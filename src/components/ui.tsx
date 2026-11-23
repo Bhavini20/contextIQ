@@ -140,7 +140,7 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${checked ? 'bg-accent' : 'bg-line-2'}`}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${checked ? 'bg-cta' : 'bg-line-2'}`}
       >
         <span
           className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-4' : ''}`}
@@ -275,7 +275,7 @@ export function Why({ children, label = 'Why?' }: { children: ReactNode; label?:
   const [open, setOpen] = useState(false)
   return (
     <span>
-      <button onClick={() => setOpen(!open)} aria-expanded={open} className="text-xs font-medium text-accent-ink underline decoration-accent/30 underline-offset-2 hover:decoration-accent">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="text-xs font-medium text-cta-ink underline decoration-cta/30 underline-offset-2 hover:decoration-cta">
         {open ? 'Hide' : label}
       </button>
       {open && <span className="mt-1 block text-xs leading-relaxed text-ink-2">{children}</span>}
@@ -286,7 +286,12 @@ export function Why({ children, label = 'Why?' }: { children: ReactNode; label?:
 export function SectionTitle({ eyebrow, title, children }: { eyebrow?: string; title: ReactNode; children?: ReactNode }) {
   return (
     <div className="mb-6">
-      {eyebrow && <div className="label mb-2">{eyebrow}</div>}
+      {eyebrow && (
+        <div className="mb-2 flex items-center gap-2.5">
+          <span className="h-px w-6 bg-accent" />
+          <span className="label">{eyebrow}</span>
+        </div>
+      )}
       <h2 className="text-[22px] font-semibold tracking-[-0.015em] text-ink sm:text-[28px]">{title}</h2>
       {children && <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-ink-2">{children}</p>}
     </div>

@@ -26,15 +26,17 @@ describe('taxonomy closeness', () => {
 })
 
 describe('worked results (spec §4)', () => {
-  it('P1 smartphone comparison: Nova wins Specific at $3.76; Strict Nova $4.00', () => {
+  it('P1 smartphone comparison: Nova and Volt protected at full bid; Nova wins $4.00; Strict Nova $4.00', () => {
     const d = run('P1')
     expect(ev(d, 'nova').pMatch).toBeCloseTo(0.9409, 4)
-    expect(ev(d, 'nova').bid).toBeCloseTo(3.7636, 4)
+    expect(ev(d, 'nova').provenance).toBe('protected')
+    expect(ev(d, 'nova').bid).toBe(4)
     expect(ev(d, 'volt').pMatch).toBeCloseTo(0.7998, 4)
-    expect(ev(d, 'volt').bid).toBeCloseTo(2.2498, 3)
+    expect(ev(d, 'volt').provenance).toBe('protected')
+    expect(ev(d, 'volt').bid).toBe(2.5)
     expect(d.winner!.campaign.id).toBe('nova')
     expect(d.winner!.band).toBe('specific')
-    expect(d.price.toFixed(2)).toBe('3.76')
+    expect(d.price.toFixed(2)).toBe('4.00')
     expect(ev(d, 'lumen').reason).toBe('BELOW-THRESHOLD')
     expect(ev(d, 'payzen').reason).toBe('BELOW-THRESHOLD')
     expect(ev(d, 'ron').reason).toBe('BELOW-FLOOR')
@@ -80,13 +82,14 @@ describe('worked results (spec §4)', () => {
     expect(run('P4', 'strict').winner).toBeNull()
   })
 
-  it('P4 after rescore: Nova wins Specific at $3.53; Strict Nova $4.00', () => {
+  it('P4 after rescore: Nova protected, wins Specific at $4.00; Strict Nova $4.00', () => {
     const d = run('P4', 'contextiq', true, true)
     expect(ev(d, 'nova').pMatch).toBeCloseTo(0.8835, 4)
-    expect(ev(d, 'nova').bid).toBeCloseTo(3.534, 4)
+    expect(ev(d, 'nova').provenance).toBe('protected')
+    expect(ev(d, 'nova').bid).toBe(4)
     expect(d.winner!.campaign.id).toBe('nova')
     expect(d.winner!.band).toBe('specific')
-    expect(d.price.toFixed(2)).toBe('3.53')
+    expect(d.price.toFixed(2)).toBe('4.00')
     const s = run('P4', 'strict', true, true)
     expect(s.winner!.campaign.id).toBe('nova')
     expect(s.price).toBe(4)
@@ -106,7 +109,7 @@ describe('worked results (spec §4)', () => {
 
   it('P5 with strict suitability: contextual campaigns excluded SUIT-LANG', () => {
     const page = getPage('P5')!
-    const d = decide(page, page.profile, CAMPAIGNS, 'contextiq', { strictSuitability: true, trustUplift: 0 }, false)
+    const d = decide(page, page.profile, CAMPAIGNS, 'contextiq', { strictSuitability: true }, false)
     expect(ev(d, 'volt').reason).toBe('SUIT-LANG')
     expect(d.winner).toBeNull()
   })
@@ -123,15 +126,17 @@ describe('worked results (spec §4)', () => {
     expect(ev(d, 'volt').reason).toBe('BELOW-THRESHOLD')
   })
 
-  it('P7 laptop vs tablet: Lumen wins Broad at $2.50; Strict Lumen $3.80', () => {
+  it('P7 laptop vs tablet: Lumen protected at $3.80 (no longer discounted); Strict Lumen $3.80', () => {
     const d = run('P7')
     expect(ev(d, 'lumen').pMatch).toBeCloseTo(0.65875, 5)
-    expect(ev(d, 'lumen').bid).toBeCloseTo(2.503, 3)
+    expect(ev(d, 'lumen').provenance).toBe('protected')
+    expect(ev(d, 'lumen').bid).toBe(3.8)
     expect(ev(d, 'volt').pMatch).toBeCloseTo(0.5238, 4)
+    expect(ev(d, 'volt').provenance).toBe('incremental')
     expect(ev(d, 'volt').bid).toBeCloseTo(1.905, 3)
     expect(d.winner!.campaign.id).toBe('lumen')
     expect(d.winner!.band).toBe('broad')
-    expect(d.price.toFixed(2)).toBe('2.50')
+    expect(d.price.toFixed(2)).toBe('3.80')
     const s = run('P7', 'strict')
     expect(s.winner!.campaign.id).toBe('lumen')
     expect(s.price).toBe(3.8)
@@ -164,8 +169,7 @@ describe('inventory', () => {
 describe('suitability violations are always 0', () => {
   const inv = buildInventory()
   const optsList: EngineOptions[] = []
-  for (const strictSuitability of [false, true])
-    for (const trustUplift of [0, 0.1, 0.2]) optsList.push({ strictSuitability, trustUplift })
+  for (const strictSuitability of [false, true]) optsList.push({ strictSuitability })
 
   it('at every slider position, for every campaign and all, under every toggle', () => {
     const ids = ['all', ...CAMPAIGNS.filter((c) => c.kind === 'contextual').map((c) => c.id)]
@@ -178,7 +182,7 @@ describe('suitability violations are always 0', () => {
         }
       }
     }
-  })
+  }, 120_000)
 
   it('sweep reports 0 violations', () => {
     for (const p of sweep(inv, CAMPAIGNS, 'all', DEFAULT_OPTIONS)) expect(p.violations).toBe(0)
@@ -250,15 +254,5 @@ describe('curated content', () => {
       expect(words, p.id).toBeLessThanOrEqual(300)
       for (const k of p.keywords) expect(text.toLowerCase(), `${p.id}: ${k.term}`).toContain(k.term.toLowerCase())
     }
-  })
-})
-
-describe('break-even uplift', () => {
-  it('is between 0 and 20% with default campaigns', async () => {
-    const { breakEvenUplift } = await import('../metrics')
-    const b = breakEvenUplift(buildInventory(), CAMPAIGNS, DEFAULT_OPTIONS)
-    expect(b).not.toBeNull()
-    expect(b!).toBeGreaterThan(0)
-    expect(b!).toBeLessThan(0.2)
   })
 })

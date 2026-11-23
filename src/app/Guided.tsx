@@ -1,11 +1,11 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
-import { getPage } from '../engine/data'
+import { CAMPAIGNS, getPage } from '../engine/data'
 import { decide, type Decision } from '../engine/engine'
 import { inventory } from '../engine/inventory'
 import { advertiserReport, suggestThreshold } from '../engine/metrics'
-import { money, prob } from '../lib/format'
+import { money, pm, prob, usd, PER_M } from '../lib/format'
 import { useApp, type AppState } from './state'
 
 type Set = ReturnType<typeof useApp>['set']
@@ -16,10 +16,12 @@ interface Step {
   caption: (s: AppState, ctx: ReturnType<typeof useApp>) => React.ReactNode
 }
 
+/** Every campaign back on its saved preset threshold (the sweep in step 6 must never leak into step 7). */
+const atPresets = (s: AppState) => ({ campaigns: s.campaigns.map((c) => ({ ...c, threshold: CAMPAIGNS.find((x) => x.id === c.id)?.threshold ?? c.threshold })), shift: 0 })
 const ev = (d: Decision, id: string) => d.evals.find((e) => e.campaign.id === id)!
-const run = (s: AppState, id: string) => {
+const run = (s: AppState, id: string, opts: AppState['opts']) => {
   const p = getPage(id)!
-  return decide(p, s.rescored.includes(id) && p.rescored ? p.rescored : p.profile, s.campaigns, 'contextiq', s.opts, false)
+  return decide(p, s.rescored.includes(id) && p.rescored ? p.rescored : p.profile, s.campaigns, 'contextiq', opts, false)
 }
 const B = ({ children }: { children: React.ReactNode }) => <span className="font-medium text-ink">{children}</span>
 const M = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-[0.95em] text-ink">{children}</span>
@@ -46,8 +48,8 @@ export const STEPS: Step[] = [
   {
     title: 'Run an impression',
     enter: (set) => set((s) => ({ view: 'pages', pageId: 'P1', strategy: 'contextiq', run: s.run + 1 })),
-    caption: (s) => {
-      const d = run(s, 'P1')
+    caption: (s, ctx) => {
+      const d = run(s, 'P1', ctx.opts)
       const w = d.winner
       const volt = ev(d, 'volt')
       const below = d.evals.filter((e) => e.reason === 'BELOW-THRESHOLD')
@@ -57,17 +59,19 @@ export const STEPS: Step[] = [
         <>
           {w ? (
             <>
-              <B>{w.campaign.name}</B> wins at <M>{money(w.bid!)}</M> ({w.band === 'specific' ? 'Specific' : w.band === 'broad' ? 'Broad' : 'Fallback'}).{' '}
+              <B>{w.campaign.name}</B> wins at <M>{money(w.bid!)}</M> ({w.band === 'specific' ? 'Specific' : w.band === 'broad' ? 'Broad' : 'Fallback'})
+              {w.provenance === 'protected' ? ', its full bid: Strict would sell this page too, so the bid is protected' : ''}.{' '}
             </>
           ) : null}
           {volt.bid !== null && (
             <>
-              Volt Accessories bids a scaled <M>{money(volt.bid)}</M>.{' '}
+              Volt Accessories bids {volt.provenance === 'protected' ? 'its full' : 'a scaled'} <M>{money(volt.bid)}</M>
+              {volt.provenance === 'protected' ? ', also protected' : ''}.{' '}
             </>
           )}
           {near.map((e) => (
             <span key={e.campaign.id}>
-              {e.campaign.name} is blocked by its threshold (P <M>{prob(e.pMatch)}</M> vs <M>{prob(e.campaign.threshold)}</M>).{' '}
+              {e.campaign.name} is blocked by its threshold (P <M>{pm(e.pMatch, e.campaign.threshold)}</M> vs <M>{prob(e.campaign.threshold)}</M>).{' '}
             </span>
           ))}
           {zero.length > 0 && <>{zero.map((e) => e.campaign.name).join(', ')} score <M>0.00</M> and are blocked too. </>}
@@ -79,13 +83,13 @@ export const STEPS: Step[] = [
   {
     title: 'Suitability is absolute',
     enter: (set) => set((s) => ({ view: 'pages', pageId: 'P3', strategy: 'contextiq', run: s.run + 1 })),
-    caption: (s) => {
-      const d = run(s, 'P3')
+    caption: (s, ctx) => {
+      const d = run(s, 'P3', ctx.opts)
       const pz = ev(d, 'payzen')
       return (
         <>
           A payment-fraud investigation. <B>PayZen Wallet</B> is excluded with <M>{pz.reason ?? 'no exclusion'}</M> even though confidence is{' '}
-          <M>{prob(d.profile.confidence!)}</M> and P(match) is <M>{prob(pz.pMatch)}</M>. The gate is never priced.
+          <M>{prob(d.profile.confidence!)}</M> and P(match) is <M>{pm(pz.pMatch)}</M>. The gate is never priced.
         </>
       )
     },
@@ -93,12 +97,12 @@ export const STEPS: Step[] = [
   {
     title: 'New demand on a weak-but-real match',
     enter: (set) => set((s) => ({ view: 'pages', pageId: 'P2', strategy: 'contextiq', run: s.run + 1 })),
-    caption: (s) => {
-      const d = run(s, 'P2')
+    caption: (s, ctx) => {
+      const d = run(s, 'P2', ctx.opts)
       const nova = ev(d, 'nova')
       return (
         <>
-          A city-living list with one phone tip. <B>Nova Phones</B> still qualifies (P <M>{prob(nova.pMatch)}</M>) but bids a discounted{' '}
+          A city-living list with one phone tip. <B>Nova Phones</B> still qualifies (P <M>{pm(nova.pMatch, nova.campaign.threshold)}</M>) but bids a discounted{' '}
           <M>{nova.bid !== null ? money(nova.bid) : '—'}</M> in the Broad band. Strict matching would leave it to run-of-network. Toggle{' '}
           <B>Strict (today)</B> to compare.
         </>
@@ -108,31 +112,37 @@ export const STEPS: Step[] = [
   {
     title: 'Move the threshold',
     enter: (set) => set({ view: 'tradeoffs', focus: 'nova' }),
-    caption: () => (
-      <>
-        Watch Nova Phones' threshold sweep from <M>0.40</M> to <M>0.90</M>: fill, revenue and relevance move live against the dashed Strict baseline. Drag the
-        slider or the charts yourself. Note the break-even trust uplift: the honest number.
-      </>
-    ),
+    caption: (_s, ctx) => {
+      const c = ctx.market.cmp
+      const rev = c.strict.revenue ? c.ciq.revenue / c.strict.revenue - 1 : 0
+      return (
+        <>
+          Watch Nova Phones' threshold sweep from <M>0.40</M> to <M>0.90</M>: fill, revenue, cost per conversion and relevance move against the dashed Strict
+          baseline. Revenue never dips below it: protected bids don't move, and the threshold only decides which extra matches join. Today ContextIQ adds{' '}
+          <M>{(rev * 100).toFixed(1)}%</M> publisher revenue.
+        </>
+      )
+    },
   },
   {
     title: 'The advertiser report',
-    enter: (set) => set({ view: 'reports', reportTab: 'advertiser', focus: 'nova' }),
+    enter: (set) => set((s) => ({ view: 'reports', reportTab: 'advertiser', focus: 'nova', ...atPresets(s) })),
     caption: (s, ctx) => {
       const nova = s.campaigns.find((c) => c.id === 'nova')!
       const r = advertiserReport(ctx.comparison, nova)
-      const broad = r.bands.find((b) => b.band === 'broad')!
-      const sug = suggestThreshold(inventory(), s.campaigns, 'nova', s.opts)
+      const sug = suggestThreshold(inventory(), s.campaigns, 'nova', ctx.opts)
       return (
         <>
-          CTR and conversion by band, <M>{money(broad.savings)}</M> saved on Broad matches, and a suggested threshold
-          {sug ? (
+          Nova Phones at its preset <M>{prob(nova.threshold)}</M>: cost per conversion against Strict and results by band.{' '}
+          {r.incrementalWins > 0 && r.savings > 0 ? (
             <>
-              {' '}
-              of <M>{prob(sug.threshold)}</M>
+              Incremental matches cost <M>{usd(r.savings * PER_M)}</M> less than full bids per 1M requests.{' '}
             </>
-          ) : null}
-          . That's the demo. Everything stays explorable.
+          ) : (
+            <>All of its wins are protected at full price. </>
+          )}
+          {sug ? (sug.same ? <>Its threshold is already the best for its preset. </> : <>Suggested threshold: <M>{prob(sug.threshold)}</M>. </>) : null}
+          That's the demo. Everything stays explorable.
         </>
       )
     },
@@ -175,6 +185,8 @@ export function GuidedBar() {
     }
     return () => {
       timers.current.forEach(clearTimeout)
+      // Leaving the sweep early (Next, Back, Esc) must not strand Nova mid-sweep.
+      if (g === 6) set(atPresets)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g])
@@ -213,12 +225,12 @@ export function GuidedBar() {
         >
           <div className="mx-auto max-w-[760px] rounded-2xl border border-line-2 bg-surface/95 p-4 shadow-[0_8px_40px_rgb(0_0_0/0.12)] backdrop-blur-md sm:p-5">
             <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-accent-ink">
+              <span className="font-mono text-xs text-cta-ink">
                 Step {g} of {STEPS.length}
               </span>
               <div className="flex flex-1 gap-1" aria-hidden>
                 {STEPS.map((_, i) => (
-                  <span key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < g! ? 'bg-accent' : 'bg-line-2'}`} />
+                  <span key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < g! ? 'bg-cta' : 'bg-line-2'}`} />
                 ))}
               </div>
               <button onClick={() => go(null)} aria-label="Exit guided demo" className="grid h-7 w-7 place-items-center rounded-md text-ink-3 hover:bg-sunken hover:text-ink">
@@ -237,7 +249,7 @@ export function GuidedBar() {
                 <button onClick={back} disabled={g === 1} className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-ink-2 hover:bg-sunken disabled:opacity-40">
                   <ArrowLeft size={14} /> Back
                 </button>
-                <button onClick={next} className="inline-flex items-center gap-1 rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-on-accent hover:bg-accent-ink">
+                <button onClick={next} className="inline-flex items-center gap-1 rounded-lg bg-cta px-3.5 py-1.5 text-sm font-medium text-white hover:bg-cta-hover">
                   {g === STEPS.length ? 'Finish' : 'Next step'} <ArrowRight size={14} />
                 </button>
               </div>

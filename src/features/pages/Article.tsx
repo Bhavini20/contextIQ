@@ -64,9 +64,8 @@ export function Article() {
         </div>
         <div className="px-5 pt-6 pb-7 sm:px-8 sm:pt-8">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-3">
-            <span className="font-mono">{page.id === 'custom' ? 'Your page' : page.id}</span>
-            <span aria-hidden>·</span>
-            <span>{page.description}</span>
+            <span className="rounded border border-line px-1.5 py-px font-mono text-[11px]">{page.id === 'custom' ? 'Your page' : page.id}</span>
+            {page.description && <span>{page.description}</span>}
           </div>
           <h1 className="font-serif text-[28px] leading-[1.15] font-medium tracking-[-0.01em] text-ink sm:text-[34px]">{page.title}</h1>
           {page.byline && <p className="mt-3 text-sm text-ink-3">{page.byline}</p>}

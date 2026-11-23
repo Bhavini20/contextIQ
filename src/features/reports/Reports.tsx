@@ -3,11 +3,11 @@ import { useMemo, useState } from 'react'
 import { useApp } from '../../app/state'
 import { BandTag, Footnote, Num, ReasonChip, SectionTitle, Segmented } from '../../components/ui'
 import { inventory } from '../../engine/inventory'
-import { advertiserReport, publisherPages, suggestThreshold, type Comparison } from '../../engine/metrics'
+import { advertiserEconomics, advertiserReport, publisherPages, suggestThreshold, type Comparison } from '../../engine/metrics'
 import { verticalOf, topicName, type TopicId } from '../../engine/taxonomy'
 import type { Page } from '../../engine/types'
-import { money, pct, prob, signedMoney } from '../../lib/format'
-import { Breakdown } from '../tradeoffs/Tradeoffs'
+import { count, money, pct, prob, signedPct, signedUsd, usd, PER_M, PER_M_LABEL } from '../../lib/format'
+import { Breakdown, PublisherNote } from '../tradeoffs/Tradeoffs'
 
 export function Reports() {
   const { state, set } = useApp()
@@ -15,7 +15,7 @@ export function Reports() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <SectionTitle eyebrow="Reports" title="Transparency is the product, not a footnote.">
-          Advertisers see what each band delivered and what they saved. Publishers see new demand separately from what was already selling, losses included.
+          Advertisers see what each band delivered and what they saved. Publishers see new demand separately from what was already selling, so any loss would show.
         </SectionTitle>
         <div className="mb-6">
           <Segmented
@@ -35,13 +35,20 @@ export function Reports() {
 }
 
 function Advertiser() {
-  const { state, set, comparison, updateCampaign } = useApp()
+  const { state, set, comparison, updateCampaign, opts } = useApp()
   const contextual = state.campaigns.filter((c) => c.kind === 'contextual')
   const id = state.focus === 'all' ? 'nova' : state.focus
   const campaign = contextual.find((c) => c.id === id)!
   const report = useMemo(() => advertiserReport(comparison, campaign), [comparison, campaign])
-  const suggestion = useMemo(() => suggestThreshold(inventory(), state.campaigns, id, state.opts), [state.campaigns, id, state.opts])
-  const broadSavings = report.bands.find((b) => b.band === 'broad')?.savings ?? 0
+  const suggestion = useMemo(() => suggestThreshold(inventory(), state.campaigns, id, opts), [state.campaigns, id, opts])
+  /** No incremental wins: every win is a protected full-price bid, so there is nothing saved or discounted to show. */
+  const allProtected = report.impressions > 0 && report.incrementalWins === 0
+  const econ = useMemo(
+    () => ({ ciq: advertiserEconomics(comparison.ciqResults, id), strict: advertiserEconomics(comparison.strictResults, id) }),
+    [comparison, id],
+  )
+  const M = PER_M
+  const rel = (c: number, s: number) => (c && s ? signedPct(c / s - 1) : '—')
 
   return (
     <div>
@@ -67,26 +74,63 @@ function Advertiser() {
         </span>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 border-t border-line sm:grid-cols-4">
-        <Stat label="Impressions won" value={<Num value={report.impressions} format={(n) => Math.round(n).toLocaleString()} />} sub={`Strict: ${report.strictImpressions}`} />
-        <Stat label="Spend ($, all wins)" value={<Num value={report.spend} format={money} />} sub={`Strict: ${money(report.strictSpend)}`} />
-        <Stat label="Expected conversions" value={<Num value={report.conversions} format={(n) => n.toFixed(2)} />} sub={`Strict: ${report.strictConversions.toFixed(2)}`} />
+      <div className="mt-6 grid grid-cols-2 border-t border-line sm:grid-cols-3">
+        <Stat label="Impressions won" value={<Num value={report.impressions * M} format={count} />} sub={`Strict: ${count(report.strictImpressions * M)}`} />
+        <Stat label="Spend" value={<Num value={report.spend * M} format={usd} />} sub={`Strict: ${usd(report.strictSpend * M)}`} />
+        <Stat label="Expected conversions" value={<Num value={report.conversions * M} format={count} />} sub={`Strict: ${count(report.strictConversions * M)}`} />
         <Stat
-          label="Saved vs paying full bid"
-          value={<Num value={report.savings} format={money} />}
-          sub={`${report.spend + report.savings > 0 ? ((report.savings / (report.spend + report.savings)) * 100).toFixed(1) : '0.0'}% below full price · ${money(broadSavings)} on Broad`}
-          accent
+          label="Cost per conversion"
+          value={<Num value={econ.ciq.cpa} format={money} />}
+          sub={
+            allProtected
+              ? 'Same as Strict: every win is protected'
+              : `${rel(econ.ciq.cpa, econ.strict.cpa)} · Strict ${econ.strict.cpa ? money(econ.strict.cpa) : '—'}`
+          }
+          tone={allProtected ? undefined : econ.strict.cpa && econ.ciq.cpa ? (econ.ciq.cpa <= econ.strict.cpa ? 'pos' : 'neg') : undefined}
         />
+        <Stat
+          label="Cost / 1,000 relevant impressions"
+          value={<Num value={econ.ciq.costPerKRelevant} format={money} />}
+          sub={
+            allProtected
+              ? 'Same as Strict: every win is protected'
+              : `${rel(econ.ciq.costPerKRelevant, econ.strict.costPerKRelevant)} · Strict ${econ.strict.costPerKRelevant ? money(econ.strict.costPerKRelevant) : '—'}`
+          }
+          tone={allProtected ? undefined : econ.strict.costPerKRelevant && econ.ciq.costPerKRelevant ? (econ.ciq.costPerKRelevant <= econ.strict.costPerKRelevant ? 'pos' : 'neg') : undefined}
+        />
+        {allProtected ? (
+          <Stat
+            label="Saved vs paying full bid"
+            value={<span className="text-[15px] leading-snug font-normal text-ink-2">All wins protected at full price</span>}
+            sub="No incremental matches at this threshold"
+          />
+        ) : (
+          <Stat
+            label="Saved vs paying full bid"
+            value={<Num value={report.savings * M} format={usd} />}
+            sub={`${((report.savings / (report.spend + report.savings)) * 100).toFixed(1)}% below full price on ${count(report.incrementalWins * M)} incremental wins`}
+            tone="pos"
+          />
+        )}
       </div>
+      <p className="mt-2 text-xs text-ink-3">
+        Totals {PER_M_LABEL} (the 1,000 simulated requests scaled × 1,000). Cost per conversion and per 1,000 relevant impressions are rates, unscaled.
+        {econ.strict.impressions === 0 && ' Strict matching wins no impressions for this campaign, so there is no Strict cost to compare.'}
+      </p>
+      {allProtected && (
+        <p className="mt-3 rounded-lg bg-sunken px-4 py-3 text-sm text-ink-2">All wins protected at full price; no incremental matches at this threshold.</p>
+      )}
 
       {/* By band */}
       <div className="mt-8 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-sm">
-          <caption className="mb-3 text-left text-lg font-semibold tracking-[-0.01em] text-ink">Performance by band</caption>
+        <table className="w-full min-w-[720px] text-sm">
+          <caption className="mb-3 text-left text-lg font-semibold tracking-[-0.01em] text-ink">
+            Performance by band <span className="ml-1 text-sm font-normal text-ink-3">{PER_M_LABEL}</span>
+          </caption>
           <thead>
             <tr className="border-b border-line text-left text-[11px] text-ink-3">
               <th className="py-2 font-normal">Band</th>
-              {['Impressions', 'Share', 'Avg CPM paid', 'CTR', 'Conv. rate', 'Spend', 'Saved vs full bid'].map((h) => (
+              {['Impressions', 'Share', 'Avg CPM paid', 'CTR', 'Post-click conv.', 'Cost / conv.', 'Spend', 'Saved vs full bid'].map((h) => (
                 <th key={h} className="py-2 text-right font-normal">
                   {h}
                 </th>
@@ -101,26 +145,27 @@ function Advertiser() {
                   <td className="py-3">
                     <BandTag band={b.band} />
                   </td>
-                  <Td>{b.impressions}</Td>
+                  <Td>{count(b.impressions * M)}</Td>
                   <Td>{pct(b.share)}</Td>
                   <Td>{b.impressions ? money(b.avgCpm) : '—'}</Td>
                   <Td>{b.impressions ? pct(b.ctr) : '—'}</Td>
                   <Td>{b.impressions ? pct(b.cvr) : '—'}</Td>
-                  <Td>{money(b.spend)}</Td>
-                  <Td className="text-pos">{money(b.savings)}</Td>
+                  <Td>{b.conversions ? money(b.spend / b.conversions) : '—'}</Td>
+                  <Td>{usd(b.spend * M)}</Td>
+                  <Td className={b.savings > 0 ? 'text-pos' : 'text-ink-3'}>{b.savings > 0 ? usd(b.savings * M) : b.impressions ? 'protected' : '—'}</Td>
                 </tr>
               ))}
           </tbody>
         </table>
         <p className="mt-2 text-xs text-ink-3">
-          CTR and conversion are expected values: 1.8% / 1.2% when the impression is truly relevant, 0.3% / 0.1% when not. Spend and savings are actual dollars over
-          the simulated requests (a CPM is the price of 1,000 impressions).
+          Expected values. Conversions = impressions × CTR × post-click conversion rate: CTR 1.8% and post-click 3% when the impression is truly relevant, 0.3%
+          and 1% when not. Impressions, spend and savings are scaled {PER_M_LABEL}; a CPM is the price of 1,000 impressions.
         </p>
       </div>
 
       <div className="mt-10 grid gap-10 lg:grid-cols-2">
         {/* Suggested threshold */}
-        <section aria-label="Suggested threshold" className="rounded-xl border border-accent/30 bg-accent-soft/40 p-5">
+        <section aria-label="Suggested threshold" className="ring-gradient rounded-xl bg-[linear-gradient(160deg,var(--accent-soft),var(--surface)_60%)] p-5">
           <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <Lightbulb size={16} className="text-accent" /> Suggested threshold
           </div>
@@ -132,18 +177,19 @@ function Advertiser() {
               </div>
               <p className="mt-3 text-sm leading-relaxed text-ink-2">{suggestion.reason}</p>
               <p className="mt-1 text-xs text-ink-3">
-                Rule: the threshold from 0.40 to 0.90 with the most conversions per $ that keeps at least half of today's impressions. Ties go lower.
+                Rule: within this preset's range ({prob(suggestion.range[0])}–{prob(suggestion.range[1])}), the threshold with the most conversions per $ that keeps
+                at least half of today's impressions and doesn't lower relevance precision.
               </p>
-              {Math.abs(suggestion.threshold - suggestion.current) > 1e-9 ? (
+              {!suggestion.same ? (
                 <button
                   onClick={() => updateCampaign(id, { threshold: suggestion.threshold })}
-                  className="mt-4 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-on-accent hover:bg-accent-ink"
+                  className="mt-4 rounded-lg bg-cta px-3.5 py-2 text-sm font-medium text-white hover:bg-cta-hover"
                 >
                   Apply {prob(suggestion.threshold)}
                 </button>
               ) : (
                 <p className="mt-4 inline-flex items-center gap-1.5 text-sm text-pos">
-                  <Check size={14} /> Applied
+                  <Check size={14} /> Already the best for this preset
                 </p>
               )}
             </>
@@ -155,7 +201,9 @@ function Advertiser() {
         {/* Exclusions */}
         <section aria-label="Excluded impressions">
           <h3 className="text-lg font-semibold tracking-[-0.01em]">Excluded impressions by reason</h3>
-          <p className="mt-1 text-sm text-ink-3">Requests {campaign.name} did not bid on: suitability exclusions on any page, threshold misses on pages with some relevance.</p>
+          <p className="mt-1 text-sm text-ink-3">
+            Requests {campaign.name} did not bid on, {PER_M_LABEL}: suitability exclusions on any page, threshold misses on pages with some relevance.
+          </p>
           {report.exclusions.length === 0 ? (
             <p className="mt-4 text-sm text-ink-3">None.</p>
           ) : (
@@ -163,12 +211,12 @@ function Advertiser() {
               {report.exclusions.map((x) => {
                 const max = report.exclusions[0].count
                 return (
-                  <li key={x.reason} className="grid grid-cols-[132px_1fr_40px] items-center gap-3">
+                  <li key={x.reason} className="grid grid-cols-[132px_1fr_64px] items-center gap-3">
                     <ReasonChip code={x.reason} />
                     <div className="h-1.5 rounded-full bg-sunken">
                       <div className={`h-full rounded-full ${x.reason.startsWith('SUIT') ? 'bg-neg' : 'bg-ink-4'}`} style={{ width: `${(x.count / max) * 100}%` }} />
                     </div>
-                    <span className="text-right font-mono text-sm text-ink-2">{x.count}</span>
+                    <span className="text-right font-mono text-sm text-ink-2">{count(x.count * M)}</span>
                   </li>
                 )
               })}
@@ -185,12 +233,12 @@ function Td({ children, className = '' }: { children: React.ReactNode; className
   return <td className={`py-3 text-right font-mono text-[13px] text-ink-2 ${className}`}>{children}</td>
 }
 
-function Stat({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub: string; accent?: boolean }) {
+function Stat({ label, value, sub, tone }: { label: string; value: React.ReactNode; sub: string; tone?: 'pos' | 'neg' }) {
   return (
-    <div className="border-b border-line py-4 pr-4 sm:border-r sm:pl-4 sm:first:pl-0 sm:last:border-r-0">
+    <div className="border-b border-line py-4 pr-4 sm:border-r sm:pl-4 sm:[&:nth-child(3n)]:border-r-0 sm:[&:nth-child(3n+1)]:pl-0">
       <div className="text-xs text-ink-3">{label}</div>
-      <div className={`mt-1.5 text-[26px] leading-8 font-medium tracking-[-0.02em] ${accent ? 'text-pos' : 'text-ink'}`}>{value}</div>
-      <div className="mt-1 font-mono text-xs text-ink-3">{sub}</div>
+      <div className="mt-1.5 text-[26px] leading-8 font-medium tracking-[-0.02em] text-ink">{value}</div>
+      <div className={`mt-1 font-mono text-xs ${tone === 'pos' ? 'text-pos' : tone === 'neg' ? 'text-neg' : 'text-ink-3'}`}>{sub}</div>
     </div>
   )
 }
@@ -254,21 +302,31 @@ function Publisher() {
         <span className="text-sm text-ink-3">{rows.length} pages</span>
       </div>
 
-      <Breakdown cmp={sub} />
+      <Breakdown cmp={sub} perMillion />
+      <PublisherNote className="mt-2" />
 
-      <div className="mt-12 grid gap-10 lg:grid-cols-2">
+      <p className="mt-12 text-xs text-ink-3">Page revenue {PER_M_LABEL} across the network, Strict → ContextIQ.</p>
+      <div className="mt-4 grid gap-10 lg:grid-cols-2">
         <PageList title="Pages that gained" tone="pos" rows={gainers} empty="No page gained in this group." onOpen={(id) => set({ view: 'pages', pageId: id })} onFlag={setFlagFor} flagFor={flagFor} />
         <PageList
           title="Pages that lost revenue"
           tone="neg"
           rows={losers}
           empty="No page lost revenue in this group."
-          caption="Cannibalisation: Strict paid full price here; ContextIQ discounts the uncertain match. The guardrail tracks it."
+          caption="A guardrail, not a forecast: Strict-eligible bids are protected, so this list should stay empty at every threshold."
           onOpen={(id) => set({ view: 'pages', pageId: id })}
           onFlag={setFlagFor}
           flagFor={flagFor}
         />
       </div>
+      <section aria-label="Phase 2" className="mt-12 rounded-xl border border-line bg-surface p-5">
+        <div className="label mb-1.5">Phase 2 · opt-in</div>
+        <h3 className="text-base font-semibold text-ink">Spend-neutral repricing</h3>
+        <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-ink-2">
+          This pilot never reprices inventory Strict already sells: those bids stay at full price. Repricing existing inventory by match quality comes only after
+          the pilot proves the signal, as an opt-in for advertisers and publishers, and designed to keep total spend neutral.
+        </p>
+      </section>
       <Footnote className="mt-8" />
     </div>
   )
@@ -311,16 +369,16 @@ function PageList({
                     {r.page.synthetic ? (
                       <span className="truncate text-sm text-ink-2">{r.page.title}</span>
                     ) : (
-                      <button onClick={() => onOpen(r.page.id)} className="truncate text-left text-sm text-ink hover:text-accent-ink hover:underline">
+                      <button onClick={() => onOpen(r.page.id)} className="truncate text-left text-sm text-ink hover:text-cta-ink hover:underline">
                         {r.page.title}
                       </button>
                     )}
                   </div>
                   <div className="mt-0.5 font-mono text-[11px] text-ink-3">
-                    {money(r.strict)} → {money(r.ciq)} · new demand {money(r.ciqNew)} · {r.requests} req
+                    {usd(r.strict * PER_M)} → {usd(r.ciq * PER_M)} · new demand {usd(r.ciqNew * PER_M)} · {pct(r.requests / 1000)} of requests
                   </div>
                 </div>
-                <span className={`font-mono text-sm ${tone === 'pos' ? 'text-pos' : 'text-neg'}`}>{signedMoney(r.delta)}</span>
+                <span className={`font-mono text-sm ${tone === 'pos' ? 'text-pos' : 'text-neg'}`}>{signedUsd(r.delta * PER_M)}</span>
               </div>
               <button onClick={() => onFlag(flagFor === r.page.id ? null : r.page.id)} className="mt-1.5 inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink">
                 <Flag size={11} /> Flag a wrong label

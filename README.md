@@ -28,7 +28,7 @@ Or from the CLI: `npx vercel --prod`.
 
 ## Before submitting
 
-- Replace `[YOUR NAME]` (`AUTHOR_NAME`) and `PROPOSAL_PDF_URL` in `src/lib/format.ts`.
+- Replace `PROPOSAL_PDF_URL` in `src/lib/format.ts` with the hosted proposal link.
 - Optionally export `public/og.svg` to `public/og.png` (1200×630) and point `og:image` at it with an absolute URL; most social platforms don't render SVG previews.
 
 ## Project structure
@@ -39,8 +39,8 @@ src/
     taxonomy.ts      Simplified IAB-style taxonomy and closeness rules
     data.ts          10 curated pages (with original article text) and 7 campaigns
     inventory.ts     Seeded inventory: 55 pages, 1,000 requests, hidden ground truth
-    engine.ts        Fit, match probability, bands, gate → threshold → price → auction, Strict baseline
-    metrics.ts       Fill, revenue, eCPM, precision, guardrails, sweep, calibration, reports, suggested threshold, break-even uplift
+    engine.ts        Fit, match probability, bands, gate → protected or threshold → price → auction, Strict baseline
+    metrics.ts       Fill, revenue, eCPM, precision, guardrails, sweep, calibration, reports, suggested threshold, bid provenance
     classifier.ts    Paste-your-own keyword classifier (demo stand-in for production models)
     __tests__/       Vitest suite
   app/               State + URL deep links, guided mode, command bar, shell
@@ -55,6 +55,13 @@ src/
 - State (view, page, strategy, focused campaign, campaign settings, toggles) lives in the URL, so any view can be shared with "Copy link".
 - Light and dark themes; `prefers-reduced-motion` is respected.
 
-## A finding worth knowing
+## Publisher-safe by design
 
-With the spec's fixed logic and 0% advertiser trust uplift, ContextIQ fills about 9.6 points more requests than Strict matching but earns about 5% less per 1,000 requests, because it discounts pages Strict already sold at full price. It breaks even at a trust uplift of roughly 6%. The prototype shows this openly (Trade-offs → "The honest number") rather than tuning the data: it is the hypothesis the pilot is designed to test.
+ContextIQ never reprices what Strict matching already sells. Each campaign submits one bid per request:
+
+- **Protected:** if the campaign is Strict-eligible (suitable, primary topic inside its target, confidence ≥ 0.70) it bids its full base bid, exactly as today. Thresholds and bid curves never touch it.
+- **Incremental:** otherwise it goes through ContextIQ: suitability gate, threshold, bid scaled by its preset curve.
+
+Because ContextIQ's bids are a superset of Strict's under the same first-price auction, publisher revenue and fill are at least Strict's on every simulated request, at every threshold from 0.30 to 0.95, with strict suitability on or off. The test suite checks this request by request. At the preset thresholds, ContextIQ fills 9.6 points more requests and earns about 20% more per 1,000 requests, with zero suitability violations.
+
+That guarantee holds in this deterministic simulation under unchanged auction rules. A live pilot measures it; production revenue can still vary. Repricing existing inventory by match quality is a Phase 2, opt-in, spend-neutral step, after the pilot proves the signal.

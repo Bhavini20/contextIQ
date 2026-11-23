@@ -16,13 +16,11 @@ export const STRICT_MIN_CONFIDENCE = 0.7
 const EPS = 1e-9
 
 export interface EngineOptions {
-  /** Exclude unvalidated-language pages for contextual campaigns (SUIT-LANG). */
+  /** Exclude unvalidated-language pages for contextual campaigns (SUIT-LANG). Applies to both strategies. */
   strictSuitability: boolean
-  /** 0 to 0.20: multiplies all ContextIQ base bids (explicit Quality Score assumption). */
-  trustUplift: number
 }
 
-export const DEFAULT_OPTIONS: EngineOptions = { strictSuitability: false, trustUplift: 0 }
+export const DEFAULT_OPTIONS: EngineOptions = { strictSuitability: false }
 
 export interface FitResult {
   fit: number
@@ -60,9 +58,17 @@ export function curveMultiplier(preset: Preset, p: number): number {
   return preset === 'broad' ? 0.5 + 0.5 * p : p
 }
 
-export function scaledBid(campaign: Campaign, p: number, trustUplift = 0): number {
+export function scaledBid(campaign: Campaign, p: number): number {
   if (campaign.kind === 'ron' || !campaign.preset) return campaign.baseBid
-  return campaign.baseBid * (1 + trustUplift) * curveMultiplier(campaign.preset, p)
+  return campaign.baseBid * curveMultiplier(campaign.preset, p)
+}
+
+/** Today's rule: primary topic inside the campaign's target branch and confidence ≥ 0.70. */
+export function strictChecks(profile: PageProfile, campaign: Campaign) {
+  const primary = profile.topics[0]
+  const strictTopicPass = !!primary && campaign.target !== null && isWithin(primary.topic, campaign.target)
+  const strictConfidencePass = profile.confidence !== null && profile.confidence >= STRICT_MIN_CONFIDENCE - EPS
+  return { strictTopicPass, strictConfidencePass, eligible: strictTopicPass && strictConfidencePass }
 }
 
 export function suitabilityCheck(
@@ -81,6 +87,13 @@ export function suitabilityCheck(
 
 export type Outcome = 'won' | 'lost' | 'excluded' | 'no-bid'
 
+/**
+ * Where a bid came from under ContextIQ.
+ * protected: Strict-eligible, bids its full base bid exactly as today (threshold and curve never apply).
+ * incremental: not Strict-eligible, admitted by the ContextIQ threshold and priced by the preset curve.
+ */
+export type Provenance = 'protected' | 'incremental'
+
 export interface CampaignEval {
   campaign: Campaign
   fit: FitResult
@@ -92,7 +105,11 @@ export interface CampaignEval {
   /** Strict matching: topic and confidence checks. */
   strictTopicPass?: boolean
   strictConfidencePass?: boolean
+  /** The campaign's base bid (what it would pay at full price). */
+  originalBid: number
   bid: number | null
+  /** Set for contextual bids under ContextIQ; null otherwise. */
+  provenance: Provenance | null
   floorPass: boolean | null
   outcome: Outcome
   reason: ReasonCode | null
@@ -133,7 +150,9 @@ export function decide(
       band: bandOf(pMatch),
       suitability,
       thresholdPass: null,
+      originalBid: c.baseBid,
       bid: null,
+      provenance: null,
       floorPass: null,
       outcome: 'excluded',
       reason: null,
@@ -147,23 +166,23 @@ export function decide(
       return { ...base, bid: c.baseBid }
     }
 
+    // Strict matching checks run under both strategies: under ContextIQ they decide protection.
+    const { strictTopicPass, strictConfidencePass, eligible } = strictChecks(profile, c)
+    const checked = { ...base, strictTopicPass, strictConfidencePass }
+
     if (strategy === 'contextiq') {
-      // 2. Threshold.
+      // 2. Protected: a Strict-eligible campaign bids its full base bid, exactly as today. One bid per campaign.
+      if (eligible) return { ...checked, bid: c.baseBid, provenance: 'protected' as const }
+      // 3. Incremental: threshold, then price by preset curve.
       const thresholdPass = pMatch >= c.threshold - EPS
-      if (!thresholdPass) return { ...base, thresholdPass, reason: 'BELOW-THRESHOLD' }
-      // 3. Price by preset curve.
-      return { ...base, thresholdPass, bid: scaledBid(c, pMatch, opts.trustUplift) }
+      if (!thresholdPass) return { ...checked, thresholdPass, reason: 'BELOW-THRESHOLD' as const }
+      return { ...checked, thresholdPass, bid: scaledBid(c, pMatch), provenance: 'incremental' as const }
     }
 
     // Strict matching (today): primary topic inside target branch, confidence ≥ 0.70, full base bid.
-    const primary = profile.topics[0]
-    const strictTopicPass = !!primary && isWithin(primary.topic, c.target!)
-    const strictConfidencePass =
-      profile.confidence !== null && profile.confidence >= STRICT_MIN_CONFIDENCE - EPS
-    if (!strictTopicPass) return { ...base, strictTopicPass, strictConfidencePass, reason: 'OFF-TOPIC' }
-    if (!strictConfidencePass)
-      return { ...base, strictTopicPass, strictConfidencePass, reason: 'LOW-CONFIDENCE' }
-    return { ...base, strictTopicPass, strictConfidencePass, bid: c.baseBid }
+    if (!strictTopicPass) return { ...checked, reason: 'OFF-TOPIC' as const }
+    if (!strictConfidencePass) return { ...checked, reason: 'LOW-CONFIDENCE' as const }
+    return { ...checked, bid: c.baseBid }
   })
 
   // 4. First-price auction: drop bids below floor; highest wins; ties to higher P(match).

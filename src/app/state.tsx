@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { CAMPAIGNS, getPage } from '../engine/data'
 import { DEFAULT_OPTIONS, decide, type Decision, type EngineOptions } from '../engine/engine'
 import { inventory } from '../engine/inventory'
-import { compare, type Comparison } from '../engine/metrics'
+import { market as computeMarket, type Comparison, type Market } from '../engine/metrics'
 import { mulberry32, SEED } from '../engine/prng'
 import type { Campaign, Page, PageProfile, Preset, RiskFlag, Strategy } from '../engine/types'
 
@@ -21,6 +21,8 @@ export interface AppState {
   reportTab: ReportTab
   guided: number | null
   run: number
+  /** "All campaigns" view: shift every campaign's own threshold by this much. Never written to the saved configs. */
+  shift: number
 }
 
 const FLAG_CODE: Record<RiskFlag, string> = { fraud: 'f', crime: 'c', tragedy: 't', 'low-quality': 'l' }
@@ -73,7 +75,7 @@ function fromUrl(): AppState {
     for (const c of campaigns)
       if (c.kind === 'contextual' && (focus === 'all' || c.id === focus)) c.threshold = Math.min(0.95, Math.max(0.3, t))
   }
-  const up = Number(q.get('uplift') ?? 0)
+  const sh = Number(q.get('shift') ?? 0)
   return {
     view,
     pageId: getPage(page) ? page : 'P1',
@@ -82,8 +84,8 @@ function fromUrl(): AppState {
     campaigns,
     opts: {
       strictSuitability: q.get('ss') === '1',
-      trustUplift: Number.isFinite(up) ? Math.min(0.2, Math.max(0, up)) : 0,
     },
+    shift: focus === 'all' && Number.isFinite(sh) ? Math.min(0.3, Math.max(-0.2, Math.round(sh * 20) / 20)) : 0,
     rescored: (q.get('rescored') ?? '').split(',').filter((x) => x === 'P4'),
     reportTab: q.get('report') === 'publisher' ? 'publisher' : 'advertiser',
     guided: null,
@@ -100,7 +102,7 @@ function toUrl(s: AppState): string {
   const cfg = encodeCampaigns(s.campaigns)
   if (cfg) q.set('cfg', cfg)
   if (s.opts.strictSuitability) q.set('ss', '1')
-  if (s.opts.trustUplift > 0) q.set('uplift', s.opts.trustUplift.toFixed(2))
+  if (s.focus === 'all' && Math.abs(s.shift) > 1e-9) q.set('shift', s.shift.toFixed(2))
   if (s.rescored.length) q.set('rescored', s.rescored.join(','))
   if (s.view === 'reports' && s.reportTab === 'publisher') q.set('report', 'publisher')
   const str = q.toString()
@@ -126,6 +128,10 @@ interface Ctx {
   ciqDecision: Decision
   ronBids: boolean
   comparison: Comparison
+  /** Both sides of the market at the saved configs. */
+  market: Market
+  /** Engine options (same as state.opts). */
+  opts: EngineOptions
   runImpression: () => void
   theme: 'light' | 'dark'
   toggleTheme: () => void
@@ -176,21 +182,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const profile = state.rescored.includes(page.id) && page.rescored ? page.rescored : page.profile
   const ronBids = ronBidsOn(state.run)
 
+  const market = useMemo(() => computeMarket(inventory(), state.campaigns, state.opts), [state.campaigns, state.opts])
+  const opts = state.opts
   const ciqDecision = useMemo(
-    () => decide(page, profile, state.campaigns, 'contextiq', state.opts, ronBids),
-    [page, profile, state.campaigns, state.opts, ronBids],
+    () => decide(page, profile, state.campaigns, 'contextiq', opts, ronBids),
+    [page, profile, state.campaigns, opts, ronBids],
   )
   const strictDecision = useMemo(
-    () => decide(page, profile, state.campaigns, 'strict', state.opts, ronBids),
-    [page, profile, state.campaigns, state.opts, ronBids],
+    () => decide(page, profile, state.campaigns, 'strict', opts, ronBids),
+    [page, profile, state.campaigns, opts, ronBids],
   )
-  const comparison = useMemo(() => compare(inventory(), state.campaigns, state.opts), [state.campaigns, state.opts])
+  const comparison = market.cmp
 
   const updateCampaign = useCallback((id: string, patch: Partial<Campaign>) => {
     setState((s) => ({ ...s, campaigns: s.campaigns.map((c) => (c.id === id ? { ...c, ...patch } : c)) }))
   }, [])
   const resetCampaigns = useCallback(() => {
-    setState((s) => ({ ...s, campaigns: decodeCampaigns(null), opts: DEFAULT_OPTIONS }))
+    setState((s) => ({ ...s, campaigns: decodeCampaigns(null), opts: DEFAULT_OPTIONS, shift: 0 }))
   }, [])
   const runImpression = useCallback(() => setState((s) => ({ ...s, run: s.run + 1 })), [])
 
@@ -208,6 +216,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ciqDecision,
     ronBids,
     comparison,
+    market,
+    opts,
     runImpression,
     theme,
     toggleTheme,

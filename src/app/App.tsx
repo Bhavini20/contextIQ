@@ -48,7 +48,11 @@ export function App() {
       {state.view === 'story' ? (
         <Landing />
       ) : (
-        <div className="min-h-dvh">
+        <div className="relative isolate min-h-dvh">
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[560px] overflow-hidden">
+            <div className="aurora opacity-55" />
+            <div className="grid-field opacity-70" />
+          </div>
           <Header onCommand={() => setCmdOpen(true)} />
           <main id="main" className={`mx-auto max-w-[1320px] px-4 pt-6 sm:px-6 lg:px-8 ${state.guided !== null ? 'pb-44' : 'pb-16'}`}>
             <AnimatePresence mode="wait" initial={false}>
@@ -89,23 +93,24 @@ function Header({ onCommand }: { onCommand: () => void }) {
     }
   }
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-paper/85 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-4 px-4 sm:px-6 lg:px-8">
-        <button onClick={() => set({ view: 'story' })} className="flex items-center gap-2.5" aria-label="ContextIQ home">
+    <header className="sticky top-0 z-40 bg-paper/80 backdrop-blur-md">
+      <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:px-8">
+        <button onClick={() => set({ view: 'story' })} className="flex min-w-0 items-center gap-2.5" aria-label="ContextIQ home">
           <Logo />
           <span className="text-[15px] font-semibold tracking-[-0.01em]">ContextIQ</span>
-          <span className="hidden whitespace-nowrap text-sm text-ink-3 2xl:inline">Quality Score for contextual</span>
         </button>
-        <nav aria-label="Console" className="ml-2 hidden items-center gap-0.5 whitespace-nowrap md:flex">
+        <nav aria-label="Console" className="ml-6 hidden items-center gap-0.5 whitespace-nowrap lg:flex">
           {NAV.map((n) => (
             <NavButton key={n.view} {...n} active={state.view === n.view} onClick={() => set({ view: n.view })} />
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-1.5">
-          <SimPill className="hidden sm:inline-flex" />
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+          <span className="hidden sm:inline-flex lg:hidden xl:inline-flex">
+            <SimPill />
+          </span>
           <button
             onClick={onCommand}
-            className="hidden items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-ink-3 hover:text-ink lg:inline-flex"
+            className="hidden items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-ink-3 hover:text-ink xl:inline-flex"
             aria-label="Open command bar"
           >
             <Command size={12} /> K
@@ -119,9 +124,10 @@ function Header({ onCommand }: { onCommand: () => void }) {
           {state.guided === null && (
             <button
               onClick={() => set({ guided: 2 })}
-              className="ml-1 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-line-2 px-2.5 py-1.5 text-sm font-medium text-ink hover:bg-sunken"
+              aria-label="Start the guided demo"
+              className="ml-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-line-2 px-2.5 py-1.5 text-sm font-medium text-ink hover:bg-sunken"
             >
-              <Play size={13} className="text-accent" /> <span className="hidden xl:inline">Guided demo</span>
+              <Play size={13} className="text-cta" /> <span className="hidden xl:inline">Guided demo</span>
             </button>
           )}
           <a
@@ -130,12 +136,13 @@ function Header({ onCommand }: { onCommand: () => void }) {
             rel="noreferrer"
             className="ml-1 hidden items-center gap-1.5 whitespace-nowrap rounded-md bg-ink px-3 py-1.5 text-sm font-medium text-paper hover:opacity-90 sm:inline-flex"
           >
-            <BookOpen size={14} /> <span className="hidden lg:inline">Read the proposal</span><span className="lg:hidden">Proposal</span>
+            <BookOpen size={14} /> <span className="hidden xl:inline">Read the proposal</span><span className="xl:hidden">Proposal</span>
           </a>
         </div>
       </div>
+      <div aria-hidden className="h-px bg-[linear-gradient(90deg,transparent,var(--accent)_30%,var(--accent)_70%,transparent)] opacity-40" />
       {/* Mobile nav: horizontal, thumb-reachable */}
-      <nav aria-label="Console" className="no-scrollbar flex gap-1 overflow-x-auto border-t border-line px-3 py-1.5 md:hidden">
+      <nav aria-label="Console" className="no-scrollbar flex gap-1 overflow-x-auto border-t border-line px-3 py-1.5 lg:hidden">
         {NAV.map((n) => (
           <NavButton key={n.view} {...n} active={state.view === n.view} onClick={() => set({ view: n.view })} />
         ))}

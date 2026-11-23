@@ -17,6 +17,10 @@
   --accent-ink: #1f45e0;
   --accent-soft: #e8edff;
   --on-accent: #ffffff;
+  --cta: #167d8d;
+  --cta-ink: #10626f;
+  --cta-hover: #10626f;
+  --cta-soft: #e3f2f4;
   --band-specific: #2f5bff;
   --band-broad: #8aa2ff;
   --band-fallback: #cfd6ee;
@@ -57,6 +61,10 @@
   --accent-ink: #8ca5ff;
   --accent-soft: #1a2142;
   --on-accent: #0b0b0c;
+  --cta: #167d8d;
+  --cta-ink: #5cc3d2;
+  --cta-hover: #10626f;
+  --cta-soft: #0f2a2e;
   --band-specific: #6b8aff;
   --band-broad: #3f56b0;
   --band-fallback: #2a3150;
@@ -96,6 +104,10 @@
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
   --color-on-accent: var(--on-accent);
+  --color-cta: var(--cta);
+  --color-cta-ink: var(--cta-ink);
+  --color-cta-hover: var(--cta-hover);
+  --color-cta-soft: var(--cta-soft);
   --color-neg: var(--neg);
   --color-neg-soft: var(--neg-soft);
   --color-pos: var(--pos);
@@ -166,8 +178,8 @@ body {
   padding: 0 2px;
   margin: 0 -1px;
   transition: background-size 600ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+  /* A keyword is one highlight: multi-word terms ("payment app") never split across a line wrap. */
+  white-space: nowrap;
 }
 .hl[data-on='true'] {
   background-size: 100% 100%;
@@ -231,6 +243,122 @@ input[type='range'].slider:active::-webkit-slider-thumb {
 }
 .no-scrollbar {
   scrollbar-width: none;
+}
+
+/* ---------- Energy: colour fields, grain, grid, gradient type ---------- */
+:root {
+  --violet: #7a5cff;
+  --coral: #ff7a59;
+  --spectrum: linear-gradient(90deg, #dfe4f5 0%, #b9c6ff 38%, #8aa2ff 52%, #2f5bff 80%, #7a5cff 100%);
+  --aurora-a: rgb(47 91 255 / 0.22);
+  --aurora-b: rgb(122 92 255 / 0.18);
+  --aurora-c: rgb(255 122 89 / 0.14);
+  --grid-line: rgb(11 11 12 / 0.05);
+}
+[data-theme='dark'] {
+  --violet: #9b85ff;
+  --coral: #ff8f73;
+  --spectrum: linear-gradient(90deg, #232a45 0%, #2f3f86 38%, #3f56b0 52%, #6b8aff 80%, #9b85ff 100%);
+  --aurora-a: rgb(107 138 255 / 0.22);
+  --aurora-b: rgb(155 133 255 / 0.18);
+  --aurora-c: rgb(255 143 115 / 0.1);
+  --grid-line: rgb(255 255 255 / 0.045);
+}
+
+/* Soft drifting colour field. Place inside a `relative isolate overflow-hidden` parent. */
+.aurora {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 140%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 45% at 72% 28%, var(--aurora-a), transparent 70%),
+    radial-gradient(35% 40% at 88% 62%, var(--aurora-b), transparent 70%),
+    radial-gradient(30% 35% at 55% 70%, var(--aurora-c), transparent 70%);
+  filter: blur(20px);
+  animation: drift 18s ease-in-out infinite alternate;
+}
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-3%, 2%, 0) scale(1.05);
+  }
+  100% {
+    transform: translate3d(2%, -2%, 0) scale(0.98);
+  }
+}
+/* Fine grid that fades out from the centre */
+.grid-field {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 70% 60% at 60% 35%, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 60% 35%, #000 30%, transparent 75%);
+}
+/* Film grain */
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.text-gradient {
+  background: linear-gradient(100deg, var(--accent) 10%, var(--violet) 60%, var(--coral) 110%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  padding-right: 0.06em;
+}
+.spectrum {
+  background: var(--spectrum);
+}
+/* 1px gradient ring around pills and cards (masked, so any background utility still works) */
+.ring-gradient {
+  position: relative;
+}
+.ring-gradient::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(100deg, var(--accent), var(--violet), var(--coral));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+/* Highlighter-marker background for numbers in headlines */
+.marker {
+  background: linear-gradient(transparent 58%, var(--mk, var(--accent-soft)) 58%);
+  padding: 0 0.08em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(15 122 85 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(15 122 85 / 0);
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 2.4s ease-in-out infinite;
 }
 
 /* Pipeline dots */

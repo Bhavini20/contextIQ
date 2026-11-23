@@ -2,6 +2,7 @@ import { AlertTriangle, ScanText } from 'lucide-react'
 import { useState } from 'react'
 import { useApp } from '../../app/state'
 import { classify, MIN_WORDS, pageFromText, SAMPLE_ARTICLE, wordCount } from '../../engine/classifier'
+import { fitFor, suitabilityCheck } from '../../engine/engine'
 import { topicPath } from '../../engine/taxonomy'
 import { prob } from '../../lib/format'
 
@@ -20,7 +21,16 @@ export function PastePanel({ onDone }: { onDone: () => void }) {
     } else {
       setShortMsg(null)
     }
-    set((s) => ({ pageId: 'custom', run: s.run + 1 }))
+    // Open on the campaign this article matches best (suitable campaigns first), so the trace starts somewhere meaningful.
+    set((s) => {
+      const conf = page.profile.confidence ?? 0
+      const ranked = s.campaigns
+        .filter((c) => c.kind === 'contextual' && c.target)
+        .map((c) => ({ id: c.id, p: conf * fitFor(page.profile, c.target!).fit, ok: suitabilityCheck(page, c, s.opts).pass }))
+        .sort((a, b) => Number(b.ok) - Number(a.ok) || b.p - a.p)
+      const best = ranked[0] && ranked[0].p > 0 ? ranked[0].id : s.focus
+      return { pageId: 'custom', run: s.run + 1, focus: best }
+    })
     onDone()
   }
 
@@ -58,7 +68,7 @@ export function PastePanel({ onDone }: { onDone: () => void }) {
           <button onClick={() => setText('')} className="rounded-lg px-3 py-2 text-sm text-ink-3 hover:text-ink">
             Clear
           </button>
-          <button onClick={analyse} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-ink">
+          <button onClick={analyse} className="rounded-lg bg-cta px-4 py-2 text-sm font-medium text-white hover:bg-cta-hover">
             Analyse
           </button>
         </div>

@@ -18,7 +18,8 @@ export function Campaigns() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <SectionTitle eyebrow="Campaign setup" title="The buyer decides what counts as a good match.">
           Pick an objective and ContextIQ applies a preset: a minimum match probability and a bid curve. Nobody tunes 200 campaigns by hand, but anyone can
-          override. Changes apply everywhere immediately and are saved in the URL.
+          override. The curve applies only to incremental matches; Strict-eligible bids stay at full price. Changes apply everywhere immediately and are saved in
+          the URL.
         </SectionTitle>
         <button onClick={resetCampaigns} className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-3 hover:text-ink">
           <RotateCcw size={14} /> Reset all
@@ -138,7 +139,7 @@ function CampaignRow({ c, impressions }: { c: Campaign; impressions: number }) {
                   <label key={f} className="inline-flex items-center gap-1.5 text-sm text-ink-2">
                     <input
                       type="checkbox"
-                      className="accent-[var(--accent)]"
+                      className="accent-[var(--cta)]"
                       checked={c.excludes.includes(f)}
                       onChange={(e) => updateCampaign(c.id, { excludes: e.target.checked ? [...c.excludes, f] : c.excludes.filter((x) => x !== f) })}
                     />
@@ -197,7 +198,7 @@ export function BidCurve({ preset, threshold, width = 240, height = 132 }: { pre
         </text>
       </svg>
       <figcaption className="mt-1 text-[11px] leading-snug text-ink-3">
-        <span className="text-accent-ink">{PRESETS[preset].label}</span> curve, solid from the threshold. Dashed: {PRESETS[other].label} for comparison.
+        <span className="text-accent-ink">{PRESETS[preset].label}</span> curve, solid from the threshold. Dashed: {PRESETS[other].label} for comparison. Incremental matches only; protected bids stay at full price.
       </figcaption>
     </figure>
   )

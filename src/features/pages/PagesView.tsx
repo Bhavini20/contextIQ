@@ -37,7 +37,7 @@ export function PagesView() {
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={`font-mono text-[11px] ${active ? 'text-accent-ink' : 'text-ink-4'}`}>{p.id}</span>
+                    <span className={`font-mono text-[11px] ${active ? 'text-cta-ink' : 'text-ink-4'}`}>{p.id}</span>
                     <span className="truncate text-[11px] text-ink-3">{p.tag}</span>
                   </div>
                   <div className={`mt-0.5 line-clamp-2 text-[13px] leading-snug ${active ? 'text-ink' : 'text-ink-2'}`}>{p.title}</div>
@@ -64,7 +64,7 @@ export function PagesView() {
             <button
               onClick={() => setPasting(true)}
               className={`flex h-full w-[180px] items-center gap-2 rounded-lg border border-dashed px-3 py-2.5 text-left text-[13px] lg:w-full ${
-                pasting ? 'border-accent text-accent-ink' : 'border-line-2 text-ink-2 hover:border-ink-4'
+                pasting ? 'border-cta text-cta-ink' : 'border-line-2 text-ink-2 hover:border-ink-4'
               }`}
             >
               <Plus size={14} /> Paste your own article

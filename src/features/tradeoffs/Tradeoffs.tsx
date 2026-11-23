@@ -3,54 +3,85 @@ import { useMemo, useRef, useState } from 'react'
 import { useApp } from '../../app/state'
 import { Footnote, Num, Slider, Switch, Tip } from '../../components/ui'
 import { inventory } from '../../engine/inventory'
-import { breakEvenUplift, calibration, sweep, SWEEP, withThreshold, type Comparison } from '../../engine/metrics'
-import { money, pct, prob, signedMoney, signedPct, signedPts } from '../../lib/format'
+import {
+  calibration,
+  market as computeMarket,
+  marketSweep,
+  shifted,
+  SHIFTS,
+  SWEEP,
+  withThreshold,
+  type Comparison,
+  type Market,
+} from '../../engine/metrics'
+import { count, money, pct, prob, signedMoney, signedPct, signedPts, usd, PER_M, PER_M_LABEL, signedUsd } from '../../lib/format'
+
+const signedShift = (d: number) => (Math.abs(d) < 1e-9 ? '±0.00' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`)
+const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`
+const pts1 = (x: number) => `${Math.abs(x * 100).toFixed(1)} pts`
 
 export function Tradeoffs() {
-  const { state, set, comparison: cmp } = useApp()
+  const { state, set, market: saved } = useApp()
   const contextual = state.campaigns.filter((c) => c.kind === 'contextual')
   const focusCampaign = contextual.find((c) => c.id === state.focus)
-  const [allT, setAllT] = useState(() => {
-    const ts = [...new Set(contextual.map((c) => c.threshold))]
-    return ts.length === 1 ? ts[0] : 0.6
-  })
-  const threshold = focusCampaign ? focusCampaign.threshold : allT
+  const all = !focusCampaign
+  const shift = all ? state.shift : 0
 
-  const setThreshold = (t: number) => {
-    const v = Math.round(Math.min(0.95, Math.max(0.3, t)) * 20) / 20
-    if (state.focus === 'all') setAllT(v)
-    set((s) => ({ campaigns: withThreshold(s.campaigns, s.focus, v) }))
+  // "All campaigns" shifts each campaign's own threshold; the saved configs are never rewritten.
+  const m: Market = useMemo(
+    () => (Math.abs(shift) > 1e-9 ? computeMarket(inventory(), shifted(state.campaigns, shift), state.opts) : saved),
+    [shift, state.campaigns, state.opts, saved],
+  )
+  const cmp = m.cmp
+  const xs = all ? SHIFTS : SWEEP
+  const x = all ? shift : focusCampaign.threshold
+  const xfmt = all ? signedShift : prob
+
+  const setX = (v: number) => {
+    if (all) set({ shift: Math.round(Math.min(0.3, Math.max(-0.2, v)) * 20) / 20 })
+    else {
+      const t = Math.round(Math.min(0.95, Math.max(0.3, v)) * 20) / 20
+      set((s) => ({ campaigns: withThreshold(s.campaigns, s.focus, t) }))
+    }
   }
 
-  // Sweep doesn't depend on the focused threshold itself: memo on everything else.
+  // The sweep doesn't depend on the current position on the x axis: memo on everything else.
   const sweepKey = JSON.stringify([
     state.focus,
     state.opts,
-    state.campaigns.map((c) => [c.id, c.preset, c.baseBid, c.excludes, state.focus === 'all' || c.id === state.focus ? 0 : c.threshold]),
+    state.campaigns.map((c) => [c.id, c.preset, c.baseBid, c.excludes, !all && c.id === state.focus ? 0 : c.threshold]),
   ])
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const points = useMemo(() => sweep(inventory(), state.campaigns, state.focus, state.opts), [sweepKey])
-  const beKey = JSON.stringify([state.campaigns, state.opts.strictSuitability])
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const breakEven = useMemo(() => breakEvenUplift(inventory(), state.campaigns, state.opts), [beKey])
+  const points = useMemo(
+    () =>
+      marketSweep(
+        inventory(),
+        xs,
+        all ? (d) => shifted(state.campaigns, d) : (t) => withThreshold(state.campaigns, state.focus, t),
+        state.opts,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sweepKey],
+  )
   const calib = useMemo(() => calibration(cmp.ciqResults), [cmp])
 
-  const d = {
-    fill: cmp.ciq.fillRate - cmp.strict.fillRate,
-    rev: cmp.strict.revenue ? cmp.ciq.revenue / cmp.strict.revenue - 1 : 0,
-    rel: cmp.ciq.precision - cmp.strict.precision,
-  }
+  const setting = all ? (
+    Math.abs(shift) < 1e-9 ? (
+      <>each campaign's own threshold</>
+    ) : (
+      <>
+        every threshold <Em>{signedShift(shift)}</Em> from its preset
+      </>
+    )
+  ) : (
+    <>
+      <Em>{prob(focusCampaign.threshold)}</Em> for {focusCampaign.name}
+    </>
+  )
 
   return (
     <div>
-      {/* The sentence that rewrites itself */}
       <div className="label mb-3">Trade-off explorer</div>
-      <p className="max-w-4xl font-serif text-[24px] leading-[1.3] tracking-[-0.01em] text-ink sm:text-[32px]" aria-live="polite">
-        At <Em>{prob(threshold)}</Em>
-        {focusCampaign ? <> for {focusCampaign.name}</> : <> for all campaigns</>}, ContextIQ fills <Em tone={d.fill >= 0 ? 'pos' : 'neg'}>{ptsWords(d.fill)}</Em>{' '}
-        {d.fill >= 0 ? 'more' : 'fewer'} requests and earns <Em tone={d.rev >= 0 ? 'pos' : 'neg'}>{Math.abs(d.rev * 100).toFixed(1)}%</Em>{' '}
-        {d.rev >= 0 ? 'more' : 'less'} per 1,000, with relevance {d.rel >= 0 ? 'up' : 'down'} <Em tone={d.rel >= 0 ? 'pos' : 'neg'}>{ptsWords(d.rel)}</Em>.
-      </p>
+      <Headline m={m} setting={setting} />
 
       {/* Controls */}
       <div className="mt-8 grid gap-6 border-y border-line py-5 lg:grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1fr)] lg:items-center lg:gap-10">
@@ -58,10 +89,7 @@ export function Tradeoffs() {
           Campaign
           <select
             value={state.focus}
-            onChange={(e) => {
-              const v = e.target.value
-              set((s) => ({ focus: v, campaigns: v === 'all' ? withThreshold(s.campaigns, 'all', allT) : s.campaigns }))
-            }}
+            onChange={(e) => set({ focus: e.target.value })}
             className="rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
           >
             <option value="all">All campaigns</option>
@@ -73,15 +101,43 @@ export function Tradeoffs() {
           </select>
         </label>
         <div>
-          <div className="flex items-baseline justify-between text-xs text-ink-3">
-            <span>Minimum match probability (threshold)</span>
-            <span className="font-mono text-lg text-accent-ink">{prob(threshold)}</span>
+          <div className="flex items-baseline justify-between gap-3 text-xs text-ink-3">
+            {all ? (
+              <Tip tip="Moves every contextual campaign's threshold up or down from its own preset (Balanced 0.60, Broad reach 0.40, Strict 0.80). Saved campaign settings are not changed.">
+                <span className="border-b border-dotted border-ink-4">Shift every threshold from its preset</span>
+              </Tip>
+            ) : (
+              <span>Minimum match probability (threshold)</span>
+            )}
+            <span className="font-mono text-lg text-accent-ink">{xfmt(x)}</span>
           </div>
-          <Slider label="Threshold" value={threshold} min={0.3} max={0.95} step={0.05} onChange={setThreshold} format={prob} />
+          <Slider
+            label={all ? 'Threshold shift' : 'Threshold'}
+            value={x}
+            min={xs[0]}
+            max={xs[xs.length - 1]}
+            step={0.05}
+            onChange={setX}
+            format={xfmt}
+          />
           <div className="flex justify-between font-mono text-[10px] text-ink-4">
-            <span>0.30 broad</span>
-            <span>0.95 strict</span>
+            {all ? (
+              <>
+                <span>−0.20 broader</span>
+                <span>+0.30 stricter</span>
+              </>
+            ) : (
+              <>
+                <span>0.30 broad</span>
+                <span>0.95 strict</span>
+              </>
+            )}
           </div>
+          {all && (
+            <p className="mt-1.5 font-mono text-[11px] leading-relaxed text-ink-3">
+              {contextual.map((c) => `${c.name.split(' ')[0]} ${prob(Math.min(0.95, Math.max(0.05, c.threshold + shift)))}`).join(' · ')}
+            </p>
+          )}
         </div>
         <div className="space-y-3">
           <Switch
@@ -93,71 +149,30 @@ export function Tradeoffs() {
               </Tip>
             }
           />
-          <div>
-            <div className="flex items-baseline justify-between text-xs text-ink-3">
-              <Tip tip="Assumption, not a result: when advertisers trust that weak matches are discounted, they raise base bids on ContextIQ. This is the Quality Score argument from search.">
-                <span className="border-b border-dotted border-ink-4">Advertiser trust uplift (assumption)</span>
-              </Tip>
-              <span className="font-mono text-ink">+{(state.opts.trustUplift * 100).toFixed(0)}%</span>
-            </div>
-            <Slider
-              label="Advertiser trust uplift"
-              value={state.opts.trustUplift}
-              min={0}
-              max={0.2}
-              step={0.01}
-              onChange={(v) => set((s) => ({ opts: { ...s.opts, trustUplift: Math.round(v * 100) / 100 } }))}
-              format={(v) => `${Math.round(v * 100)}%`}
-            />
-          </div>
+          <p className="text-xs leading-relaxed text-ink-3">
+            Strict-eligible bids are protected: they bid in full and the threshold never touches them. The threshold only decides which extra matches join.
+          </p>
         </div>
       </div>
 
-      <BreakEven breakEven={breakEven} uplift={state.opts.trustUplift} onApply={(u) => set((s) => ({ opts: { ...s.opts, trustUplift: Math.min(0.2, Math.ceil(u * 100) / 100) } }))} />
+      <Kpis m={m} />
+      <PublisherNote className="mt-3" />
 
-      <Kpis cmp={cmp} />
-
-      {/* Main chart: three aligned small multiples, one cursor */}
+      {/* Main chart: aligned small multiples, one cursor */}
       <section aria-label="Threshold sweep" className="mt-10 scroll-mt-20">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-lg font-semibold tracking-[-0.01em]">What the threshold trades</h2>
-          <p className="text-sm text-ink-3">Drag across any chart to move the threshold. Dashed grey: Strict matching, which has no threshold.</p>
+          <p className="text-sm text-ink-3">Drag across any chart to move the {all ? 'shift' : 'threshold'}. Dashed grey: Strict matching, which has no threshold.</p>
         </div>
-        <div className="mt-5 grid gap-8 md:grid-cols-3 md:gap-6">
-          <Multiple
-            title="Fill rate"
-            xs={SWEEP}
-            ys={points.map((p) => p.fillRate)}
-            strict={cmp.strict.fillRate}
-            fmt={pct}
-            threshold={threshold}
-            onThreshold={setThreshold}
-            note={note(points.map((p) => p.fillRate), cmp.strict.fillRate, 'fill')}
-          />
-          <Multiple
-            title="Revenue per 1,000 requests"
-            xs={SWEEP}
-            ys={points.map((p) => p.revenue)}
-            strict={cmp.strict.revenue}
-            fmt={money}
-            threshold={threshold}
-            onThreshold={setThreshold}
-            note={note(points.map((p) => p.revenue), cmp.strict.revenue, 'revenue')}
-          />
-          <Multiple
-            title="Relevance precision"
-            xs={SWEEP}
-            ys={points.map((p) => p.precision)}
-            strict={cmp.strict.precision}
-            fmt={pct}
-            threshold={threshold}
-            onThreshold={setThreshold}
-            note={note(points.map((p) => p.precision), cmp.strict.precision, 'relevance')}
-          />
+        <div className="mt-5 grid gap-8 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
+          <Multiple title="Fill rate" side="Publisher" xs={xs} xfmt={xfmt} ys={points.map((p) => p.fillRate)} strict={cmp.strict.fillRate} fmt={pct} value={x} onChange={setX} note={note(xs, xfmt, points.map((p) => p.fillRate), cmp.strict.fillRate, 'fill')} />
+          <Multiple title="Revenue per 1,000 requests" side="Publisher" xs={xs} xfmt={xfmt} ys={points.map((p) => p.revenue)} strict={cmp.strict.revenue} fmt={money} value={x} onChange={setX} note={note(xs, xfmt, points.map((p) => p.revenue), cmp.strict.revenue, 'revenue')} />
+          <Multiple title="Cost per conversion" side="Advertiser" xs={xs} xfmt={xfmt} ys={points.map((p) => p.cpa)} strict={m.adv.strict.cpa} fmt={money} value={x} onChange={setX} note={note(xs, xfmt, points.map((p) => p.cpa), m.adv.strict.cpa, 'cpa')} />
+          <Multiple title="Relevance precision" side="Advertiser" xs={xs} xfmt={xfmt} ys={points.map((p) => p.precision)} strict={cmp.strict.precision} fmt={pct} value={x} onChange={setX} note={note(xs, xfmt, points.map((p) => p.precision), cmp.strict.precision, 'relevance')} />
         </div>
         <p className="mt-4 text-sm text-ink-2">
-          <span className="font-medium text-ink">What to notice:</span> a lower threshold buys reach with relevance; a higher one protects relevance but gives
-          the requests back to run-of-network or to nobody. Suitability violations stay at 0 everywhere on the curve.
+          <span className="font-medium text-ink">What to notice:</span> a lower threshold admits more incremental matches, buying reach with some relevance; a higher
+          one admits fewer. Revenue never drops below Strict anywhere on the curve, because protected bids don't move, and suitability violations stay at 0.
         </p>
         <Footnote className="mt-1.5" />
       </section>
@@ -168,24 +183,71 @@ export function Tradeoffs() {
   )
 }
 
-function ptsWords(x: number) {
-  return `${Math.abs(x * 100).toFixed(1)} points`
+/* ---------- The sentence that rewrites itself ---------- */
+function Headline({ m, setting }: { m: Market; setting: React.ReactNode }) {
+  const c = m.cmp
+  const fill = c.ciq.fillRate - c.strict.fillRate
+  const rev = c.strict.revenue ? c.ciq.revenue / c.strict.revenue - 1 : 0
+  const v = c.ciq.violations
+  const p = m.provenance
+  const rel = c.ciq.precision - c.strict.precision
+  return (
+    <div aria-live="polite">
+      <p className="max-w-5xl font-serif text-[24px] leading-[1.3] tracking-[-0.01em] text-ink sm:text-[32px]">
+        At {setting}, ContextIQ fills <Em tone="pos">{pts1(fill)}</Em> more requests and adds <Em tone="pos">{pct1(rev)}</Em> publisher revenue, with{' '}
+        {v === 0 ? <Em tone="pos">zero</Em> : <Em tone="neg">{v}</Em>} suitability violations.
+      </p>
+      <p className="mt-3 max-w-4xl text-[15px] leading-relaxed text-ink-2">
+        Every page Strict sells today still sells at full price: <span className="font-mono text-ink">{p.protectedWins}</span> protected wins, plus{' '}
+        <span className="font-mono text-ink">{p.incrementalWins}</span> incremental wins Strict couldn't make. {p.gained} requests earn more than today, the other{' '}
+        {p.sameAsToday} earn the same. Advertisers pay <Delta v={m.savings} fmt={pct1} words={['less', 'more']} /> per conversion; relevance is{' '}
+        <Delta v={rel} fmt={pts1} words={['higher', 'lower']} /> than Strict.
+      </p>
+    </div>
+  )
+}
+
+/** The honesty note that sits under every publisher number. */
+export function PublisherNote({ className = '' }: { className?: string }) {
+  return (
+    <p className={`max-w-3xl text-xs leading-relaxed text-ink-3 ${className}`}>
+      Guaranteed in this deterministic simulation under unchanged auction rules. A live pilot measures it; production revenue can still vary.
+    </p>
+  )
+}
+
+function Delta({ v, fmt, words }: { v: number; fmt: (n: number) => string; words: [string, string] }) {
+  const up = v >= 0
+  return (
+    <span className={`font-mono ${Math.abs(v) < 5e-4 || !up ? 'text-ink' : 'text-pos'}`}>
+      {fmt(Math.abs(v))} {up ? words[0] : words[1]}
+    </span>
+  )
 }
 
 function Em({ children, tone }: { children: React.ReactNode; tone?: 'pos' | 'neg' }) {
+  const mk = tone === 'pos' ? 'var(--pos-soft)' : tone === 'neg' ? 'var(--neg-soft)' : 'var(--accent-soft)'
   return (
-    <span className={`font-sans font-medium tnum ${tone === 'pos' ? 'text-pos' : tone === 'neg' ? 'text-neg' : 'text-accent-ink'}`} style={{ fontSize: '0.82em' }}>
+    <span
+      className={`marker font-sans font-medium tnum ${tone === 'pos' ? 'text-pos' : tone === 'neg' ? 'text-neg' : 'text-accent-ink'}`}
+      style={{ fontSize: '0.82em', ['--mk' as string]: mk }}
+    >
       {children}
     </span>
   )
 }
 
-function note(ys: number[], strict: number, kind: 'fill' | 'revenue' | 'relevance'): string {
+function note(xs: number[], xfmt: (n: number) => string, ys: number[], strict: number, kind: 'fill' | 'revenue' | 'relevance' | 'cpa'): string {
   if (kind === 'revenue') {
-    const above = SWEEP.filter((_, i) => ys[i] >= strict)
-    if (above.length === 0) return 'Below Strict at every threshold without trust uplift.'
-    if (above.length === SWEEP.length) return 'Above Strict at every threshold.'
-    return `Matches or beats Strict at thresholds up to ${prob(Math.max(...above))}.`
+    const above = xs.filter((_, i) => ys[i] >= strict - 1e-9)
+    if (above.length === xs.length) return 'At or above Strict at every threshold: protected bids never move.'
+    return `At or above Strict at ${above.length} of ${xs.length} settings.`
+  }
+  if (kind === 'cpa') {
+    const below = xs.filter((_, i) => ys[i] <= strict + 1e-9)
+    if (below.length === xs.length) return 'At or below Strict per conversion everywhere: incremental matches are priced by fit.'
+    if (below.length === 0) return 'Costs more per conversion than Strict everywhere.'
+    return `At or below Strict per conversion from ${xfmt(Math.min(...below))} up.`
   }
   let best = 0
   let at = 0
@@ -198,27 +260,31 @@ function note(ys: number[], strict: number, kind: 'fill' | 'revenue' | 'relevanc
   }
   if (best < 0.005) return kind === 'fill' ? 'Flat: other demand picks up what this campaign drops.' : 'Little change across the range.'
   return kind === 'fill'
-    ? `Steepest loss of reach between ${prob(SWEEP[at - 1])} and ${prob(SWEEP[at])}.`
-    : `Biggest relevance gain between ${prob(SWEEP[at - 1])} and ${prob(SWEEP[at])}.`
+    ? `Steepest loss of reach between ${xfmt(xs[at - 1])} and ${xfmt(xs[at])}.`
+    : `Biggest relevance gain between ${xfmt(xs[at - 1])} and ${xfmt(xs[at])}.`
 }
 
 function Multiple({
   title,
+  side,
   xs,
+  xfmt,
   ys,
   strict,
   fmt,
-  threshold,
-  onThreshold,
+  value,
+  onChange,
   note,
 }: {
   title: string
+  side: 'Publisher' | 'Advertiser'
   xs: number[]
+  xfmt: (n: number) => string
   ys: number[]
   strict: number
   fmt: (n: number) => string
-  threshold: number
-  onThreshold: (t: number) => void
+  value: number
+  onChange: (t: number) => void
   note: string
 }) {
   const W = 360
@@ -227,33 +293,39 @@ function Multiple({
   const svgRef = useRef<SVGSVGElement>(null)
   const [hover, setHover] = useState<number | null>(null)
   const dragging = useRef(false)
+  const x0 = xs[0]
+  const x1 = xs[xs.length - 1]
+  const step = xs[1] - xs[0]
 
   const lo = Math.min(strict, ...ys)
   const hi = Math.max(strict, ...ys)
   const span = Math.max(hi - lo, Math.abs(hi) * 0.1, 0.01)
   const y0 = lo - span * 0.25
   const y1 = hi + span * 0.25
-  const x = (t: number) => pad.l + ((t - 0.3) / 0.65) * (W - pad.l - pad.r)
+  const x = (t: number) => pad.l + ((t - x0) / (x1 - x0)) * (W - pad.l - pad.r)
   const y = (v: number) => pad.t + (1 - (v - y0) / (y1 - y0)) * (H - pad.t - pad.b)
   const line = xs.map((t, i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(ys[i]).toFixed(1)}`).join(' ')
-  const area = `${line} L${x(0.95)},${H - pad.b} L${x(0.3)},${H - pad.b} Z`
-  const idx = Math.round((threshold - 0.3) / 0.05)
-  const cur = ys[Math.max(0, Math.min(ys.length - 1, idx))]
+  const area = `${line} L${x(x1)},${H - pad.b} L${x(x0)},${H - pad.b} Z`
+  const idx = Math.max(0, Math.min(ys.length - 1, Math.round((value - x0) / step)))
+  const cur = ys[idx]
   const hi_ = hover ?? idx
   const hv = ys[hi_]
+  const ticks = x0 < 0 ? [x0, 0, x1] : [0.3, 0.5, 0.8, 0.95].filter((t) => t >= x0 && t <= x1)
 
   const tFromEvent = (e: React.PointerEvent) => {
     const r = svgRef.current!.getBoundingClientRect()
     const px = ((e.clientX - r.left) / r.width) * W
-    const t = 0.3 + ((px - pad.l) / (W - pad.l - pad.r)) * 0.65
-    return Math.round(Math.min(0.95, Math.max(0.3, t)) * 20) / 20
+    const t = x0 + ((px - pad.l) / (W - pad.l - pad.r)) * (x1 - x0)
+    return Math.round(Math.min(x1, Math.max(x0, t)) / step) * step
   }
 
   return (
     <figure className="m-0 min-w-0">
-      <div className="flex items-baseline justify-between">
-        <figcaption className="text-sm font-medium text-ink">{title}</figcaption>
-        <div className="text-right">
+      <div className="flex items-baseline justify-between gap-2">
+        <figcaption className="text-sm font-medium text-ink">
+          {title} <span className="ml-1 text-[10px] font-normal tracking-wide text-ink-4 uppercase">{side}</span>
+        </figcaption>
+        <div className="shrink-0 text-right">
           <Num value={cur} format={fmt} className="font-mono text-[15px] text-accent-ink" />
           <span className="ml-2 font-mono text-xs text-ink-3">vs {fmt(strict)}</span>
         </div>
@@ -264,16 +336,16 @@ function Multiple({
         width="100%"
         className="mt-1 touch-none overflow-visible select-none"
         role="img"
-        aria-label={`${title}: ContextIQ ${fmt(cur)} at threshold ${prob(threshold)}; Strict ${fmt(strict)}`}
+        aria-label={`${title}: ContextIQ ${fmt(cur)} at ${xfmt(value)}; Strict ${fmt(strict)}`}
         onPointerDown={(e) => {
           dragging.current = true
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
-          onThreshold(tFromEvent(e))
+          onChange(tFromEvent(e))
         }}
         onPointerMove={(e) => {
           const t = tFromEvent(e)
-          setHover(Math.round((t - 0.3) / 0.05))
-          if (dragging.current) onThreshold(t)
+          setHover(Math.round((t - x0) / step))
+          if (dragging.current) onChange(t)
         }}
         onPointerUp={() => (dragging.current = false)}
         onPointerLeave={() => {
@@ -283,36 +355,43 @@ function Multiple({
         style={{ cursor: 'ew-resize' }}
       >
         <line x1={pad.l} x2={W - pad.r} y1={H - pad.b} y2={H - pad.b} stroke="var(--line-2)" />
-        {[0.3, 0.5, 0.8, 0.95].map((t) => (
-          <text key={t} x={x(t)} y={H - 6} fontSize="10" textAnchor="middle" fill="var(--ink-3)" className="tnum">
-            {t.toFixed(2)}
+        {ticks.map((t) => (
+          <text key={t} x={x(t)} y={H - 6} fontSize="10" textAnchor={t === x0 ? 'start' : t === x1 ? 'end' : 'middle'} fill="var(--ink-3)" className="tnum">
+            {xfmt(t)}
           </text>
         ))}
-        <path d={area} fill="var(--accent)" opacity={0.06} />
-        {/* Strict baseline */}
+        <defs>
+          <linearGradient id={`fill-${title.replace(/\W/g, '')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.22} />
+            <stop offset="100%" stopColor="var(--violet)" stopOpacity={0} />
+          </linearGradient>
+          <linearGradient id={`line-${title.replace(/\W/g, '')}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="var(--accent)" />
+            <stop offset="100%" stopColor="var(--violet)" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill={`url(#fill-${title.replace(/\W/g, '')})`} />
         <line x1={pad.l} x2={W - pad.r} y1={y(strict)} y2={y(strict)} stroke="var(--strict)" strokeDasharray="4 4" strokeWidth={1.25} />
         <text x={W - pad.r} y={y(strict) - 5} fontSize="10" textAnchor="end" fill="var(--ink-3)">
           Strict
         </text>
-        <path d={line} fill="none" stroke="var(--accent)" strokeWidth={2.25} strokeLinejoin="round" />
+        <path d={line} fill="none" stroke={`url(#line-${title.replace(/\W/g, '')})`} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
         <text x={pad.l} y={Math.max(12, y(ys[0]) - 8)} fontSize="10" fill="var(--accent-ink)">
           ContextIQ
         </text>
-        {/* hover crosshair */}
         {hover !== null && hover !== idx && (
           <g>
             <line x1={x(xs[hover])} x2={x(xs[hover])} y1={pad.t - 6} y2={H - pad.b} stroke="var(--ink-4)" strokeWidth={1} />
             <circle cx={x(xs[hover])} cy={y(hv)} r={3} fill="var(--surface)" stroke="var(--ink-3)" strokeWidth={1.5} />
           </g>
         )}
-        {/* threshold cursor */}
-        <line x1={x(threshold)} x2={x(threshold)} y1={pad.t - 10} y2={H - pad.b} stroke="var(--ink)" strokeWidth={1.5} style={{ transition: 'all 150ms ease-out' }} />
-        <circle cx={x(threshold)} cy={y(cur)} r={4.5} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2} style={{ transition: 'all 150ms ease-out' }} />
+        <line x1={x(value)} x2={x(value)} y1={pad.t - 10} y2={H - pad.b} stroke="var(--ink)" strokeWidth={1.5} style={{ transition: 'all 150ms ease-out' }} />
+        <circle cx={x(value)} cy={y(cur)} r={4.5} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2} style={{ transition: 'all 150ms ease-out' }} />
         {hover !== null && (
           <g>
-            <rect x={Math.min(W - 150, Math.max(0, x(xs[hi_]) - 75))} y={0} width={150} height={18} rx={4} fill="var(--ink)" />
-            <text x={Math.min(W - 75, Math.max(75, x(xs[hi_])))} y={12.5} fontSize="10.5" textAnchor="middle" fill="var(--paper)" className="tnum">
-              {prob(xs[hi_])}: {fmt(hv)} · Strict {fmt(strict)}
+            <rect x={Math.min(W - 160, Math.max(0, x(xs[hi_]) - 80))} y={0} width={160} height={18} rx={4} fill="var(--ink)" />
+            <text x={Math.min(W - 80, Math.max(80, x(xs[hi_])))} y={12.5} fontSize="10.5" textAnchor="middle" fill="var(--paper)" className="tnum">
+              {xfmt(xs[hi_])}: {fmt(hv)} · Strict {fmt(strict)}
             </text>
           </g>
         )}
@@ -322,38 +401,36 @@ function Multiple({
   )
 }
 
-function BreakEven({ breakEven, uplift, onApply }: { breakEven: number | null; uplift: number; onApply: (u: number) => void }) {
-  if (breakEven === null)
-    return <p className="mt-5 text-sm text-ink-2">At these settings ContextIQ revenue stays below Strict even with a 50% trust uplift.</p>
-  if (breakEven === 0)
-    return (
-      <p className="mt-5 text-sm text-ink-2">
-        <span className="font-medium text-pos">ContextIQ out-earns Strict here with no trust uplift.</span> New demand on weak-but-real pages more than covers
-        the discount on strong ones.
-      </p>
-    )
-  const met = uplift >= breakEven - 1e-9
-  return (
-    <div className="mt-5 flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-      <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
-        <span className="font-medium text-ink">The honest number.</span> Discounting weak matches costs revenue on pages that were already selling. ContextIQ
-        breaks even with Strict once advertisers raise base bids by{' '}
-        <span className="font-mono font-medium text-accent-ink">{(breakEven * 100).toFixed(1)}%</span> because they trust the signal.{' '}
-        {met ? 'At the current uplift it does.' : 'That is the hypothesis the pilot tests, not a result we assume.'}
-      </p>
-      {!met && breakEven <= 0.2 && (
-        <button onClick={() => onApply(breakEven)} className="shrink-0 rounded-lg border border-line-2 px-3 py-1.5 text-sm font-medium text-ink hover:bg-sunken">
-          Set uplift to {Math.ceil(breakEven * 100)}%
-        </button>
-      )}
-    </div>
-  )
+type Kpi = {
+  label: string
+  side: 'Publisher' | 'Advertiser' | 'Guardrail'
+  tip: string
+  ciq: number
+  strict: number
+  fmt: (n: number) => string
+  delta: string
+  good: boolean | null
+  note?: string
 }
 
-function Kpis({ cmp }: { cmp: Comparison }) {
-  const items: { label: string; tip: string; ciq: number; strict: number; fmt: (n: number) => string; delta: string; good: boolean | null; guard?: boolean }[] = [
+function Kpis({ m }: { m: Market }) {
+  const cmp = m.cmp
+  const a = m.adv
+  const rel = (c: number, s: number) => signedPct(s ? c / s - 1 : 0)
+  const items: Kpi[] = [
+    {
+      label: 'Revenue / 1,000 requests',
+      side: 'Publisher',
+      tip: 'North star for publishers. Sum of winning CPMs ÷ 1,000, over exactly 1,000 requests.',
+      ciq: cmp.ciq.revenue,
+      strict: cmp.strict.revenue,
+      fmt: money,
+      delta: rel(cmp.ciq.revenue, cmp.strict.revenue),
+      good: cmp.ciq.revenue >= cmp.strict.revenue,
+    },
     {
       label: 'Fill rate',
+      side: 'Publisher',
       tip: 'Filled requests ÷ 1,000.',
       ciq: cmp.ciq.fillRate,
       strict: cmp.strict.fillRate,
@@ -362,16 +439,8 @@ function Kpis({ cmp }: { cmp: Comparison }) {
       good: cmp.ciq.fillRate >= cmp.strict.fillRate,
     },
     {
-      label: 'Revenue / 1,000 requests',
-      tip: 'North star. Sum of winning CPMs ÷ 1,000, over exactly 1,000 requests.',
-      ciq: cmp.ciq.revenue,
-      strict: cmp.strict.revenue,
-      fmt: money,
-      delta: signedPct(cmp.strict.revenue ? cmp.ciq.revenue / cmp.strict.revenue - 1 : 0),
-      good: cmp.ciq.revenue >= cmp.strict.revenue,
-    },
-    {
       label: 'eCPM',
+      side: 'Publisher',
       tip: 'Revenue ÷ filled impressions × 1,000.',
       ciq: cmp.ciq.ecpm,
       strict: cmp.strict.ecpm,
@@ -380,63 +449,106 @@ function Kpis({ cmp }: { cmp: Comparison }) {
       good: null,
     },
     {
+      label: 'Cost per conversion',
+      side: 'Advertiser',
+      tip: 'North star for advertisers. Contextual spend ÷ expected conversions, all contextual campaigns. Conversions = impressions × CTR (1.8% relevant, 0.3% not) × post-click conversion rate (3% relevant, 1% not).',
+      ciq: a.ciq.cpa,
+      strict: a.strict.cpa,
+      fmt: money,
+      delta: rel(a.ciq.cpa, a.strict.cpa),
+      good: a.ciq.cpa <= a.strict.cpa + 1e-12,
+    },
+    {
+      label: 'Relevant impressions delivered',
+      side: 'Advertiser',
+      tip: 'Contextual wins that are truly relevant (hidden ground truth), per 1,000 simulated requests.',
+      ciq: cmp.ciq.relevantWins,
+      strict: cmp.strict.relevantWins,
+      fmt: (n) => count(n),
+      delta: `${cmp.ciq.relevantWins - cmp.strict.relevantWins >= 0 ? '+' : '−'}${count(Math.abs(cmp.ciq.relevantWins - cmp.strict.relevantWins))}`,
+      good: cmp.ciq.relevantWins >= cmp.strict.relevantWins,
+    },
+    {
       label: 'Relevance precision',
+      side: 'Advertiser',
       tip: 'Contextual wins that are truly relevant (hidden ground truth) ÷ all contextual wins. Run-of-network excluded.',
       ciq: cmp.ciq.precision,
       strict: cmp.strict.precision,
       fmt: pct,
       delta: signedPts(cmp.ciq.precision - cmp.strict.precision),
-      good: cmp.ciq.precision >= cmp.strict.precision,
+      good: null,
+      note: "Precision dips because incremental matches are broader by design; the advertiser's threshold controls how many join.",
+    },
+    {
+      label: 'Cost / 1,000 relevant impressions',
+      side: 'Advertiser',
+      tip: 'Contextual spend ÷ truly relevant impressions (hidden ground truth) × 1,000. What a relevant audience costs.',
+      ciq: a.ciq.costPerKRelevant,
+      strict: a.strict.costPerKRelevant,
+      fmt: money,
+      delta: rel(a.ciq.costPerKRelevant, a.strict.costPerKRelevant),
+      good: a.ciq.costPerKRelevant <= a.strict.costPerKRelevant + 1e-12,
+    },
+    {
+      label: 'Revenue on already-selling',
+      side: 'Guardrail',
+      tip: 'Revenue per 1,000 requests on requests that Strict filled with a contextual campaign. Strict-eligible bids are protected, so this can never drop; a drop would be cannibalisation.',
+      ciq: cmp.alreadySelling.ciq,
+      strict: cmp.alreadySelling.strict,
+      fmt: money,
+      delta: cmp.alreadySelling.ciq >= cmp.alreadySelling.strict - 1e-9 ? `Guardrail held · ${signedMoney(cmp.alreadySelling.ciq - cmp.alreadySelling.strict)}` : 'BREACH',
+      good: cmp.alreadySelling.ciq >= cmp.alreadySelling.strict - 1e-9,
     },
     {
       label: 'Suitability violations',
-      tip: "Wins where a page flag is in the winner's exclusions. Guardrail: must always be 0 (enforced by a unit test).",
+      side: 'Guardrail',
+      tip: "Wins where a page flag is in the winner's exclusions. Must always be 0 (enforced by a unit test).",
       ciq: cmp.ciq.violations,
       strict: cmp.strict.violations,
       fmt: (n) => Math.round(n).toString(),
       delta: cmp.ciq.violations === 0 ? 'Guardrail held' : 'BREACH',
       good: cmp.ciq.violations === 0,
-      guard: true,
-    },
-    {
-      label: 'Revenue on already-selling',
-      tip: 'Guardrail. Revenue on requests that Strict filled with a contextual campaign, under each strategy. Drops here are cannibalisation.',
-      ciq: cmp.alreadySelling.ciq,
-      strict: cmp.alreadySelling.strict,
-      fmt: money,
-      delta: signedMoney(cmp.alreadySelling.ciq - cmp.alreadySelling.strict),
-      good: cmp.alreadySelling.ciq >= cmp.alreadySelling.strict - 1e-9,
-      guard: true,
     },
   ]
   return (
-    <div className="mt-8 grid grid-cols-2 border-t border-line sm:grid-cols-3 xl:grid-cols-6">
+    <div className="mt-8 grid grid-cols-2 border-t border-line sm:grid-cols-3">
       {items.map((k) => (
-        <div key={k.label} className="border-b border-line py-4 pr-4 xl:border-r xl:pl-4 xl:first:pl-0 xl:last:border-r-0">
-          <Tip tip={k.tip}>
-            <span className="flex items-center gap-1.5 text-xs text-ink-3">
-              {k.guard && <span className="rounded bg-sunken px-1 py-px text-[10px] tracking-wide text-ink-3 uppercase">Guardrail</span>}
-              <span className="border-b border-dotted border-ink-4">{k.label}</span>
+        <div
+          key={k.label}
+          className={`border-b border-line py-4 pr-3 pl-3 sm:border-r sm:pl-4 sm:[&:nth-child(3n)]:border-r-0 ${k.side === 'Advertiser' ? 'bg-[linear-gradient(180deg,var(--accent-soft),transparent)]' : ''}`}
+        >
+          <div>
+            <span className={`text-[10px] tracking-wide uppercase ${k.side === 'Guardrail' ? 'rounded bg-sunken px-1 py-px text-ink-3' : k.side === 'Advertiser' ? 'text-accent-ink' : 'text-ink-4'}`}>
+              {k.side}
             </span>
+          </div>
+          <Tip tip={k.tip} className="mt-1 flex">
+            <span className="border-b border-dotted border-ink-4 text-xs text-ink-3">{k.label}</span>
           </Tip>
           <div className="mt-1.5 text-[26px] leading-8 font-medium tracking-[-0.02em] text-ink">
             <Num value={k.ciq} format={k.fmt} />
           </div>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2 font-mono text-xs">
-            <span className={k.good === null ? 'text-ink-2' : k.good ? 'text-pos' : 'text-neg'}>{k.delta}</span>
+            <span className={k.good === null ? 'text-ink-2' : k.good ? 'text-pos' : k.side === 'Guardrail' ? 'text-neg' : 'text-ink-2'}>{k.delta}</span>
             <span className="text-ink-3">Strict {k.fmt(k.strict)}</span>
           </div>
+          {k.note && <p className="mt-1.5 text-[11px] leading-snug text-ink-3">{k.note}</p>}
         </div>
       ))}
     </div>
   )
 }
 
-export function Breakdown({ cmp }: { cmp: Comparison }) {
+/** Revenue split by already-selling vs new demand. `perMillion` scales totals from 1,000 to 1M requests. */
+export function Breakdown({ cmp, perMillion = false }: { cmp: Comparison; perMillion?: boolean }) {
+  const k = perMillion ? PER_M : 1
+  const f = perMillion ? usd : money
+  const sf = perMillion ? signedUsd : signedMoney
   const max = Math.max(cmp.ciq.revenue, cmp.strict.revenue) * 1.05
   const w = (v: number) => `${(v / max) * 100}%`
   const lossAlready = cmp.alreadySelling.ciq - cmp.alreadySelling.strict
   const gainNew = cmp.newDemand.ciq - cmp.newDemand.strict
+  const total = cmp.alreadySelling.requests + cmp.newDemand.requests
   const rows = [
     { label: 'Strict (today)', already: cmp.alreadySelling.strict, other: cmp.newDemand.strict, otherLabel: 'run-of-network', strict: true },
     { label: 'ContextIQ', already: cmp.alreadySelling.ciq, other: cmp.newDemand.ciq, otherLabel: 'new demand', strict: false },
@@ -445,26 +557,18 @@ export function Breakdown({ cmp }: { cmp: Comparison }) {
     <section aria-label="Revenue breakdown" className="mt-12">
       <h2 className="text-lg font-semibold tracking-[-0.01em]">Where the revenue comes from</h2>
       <p className="mt-1 text-sm text-ink-3">
-        Per 1,000 requests, split by whether Strict matching already sold the request to a contextual campaign ({cmp.alreadySelling.requests} requests) or
-        not ({cmp.newDemand.requests}).
+        {perMillion ? 'Publisher revenue per 1M network requests' : 'Per 1,000 requests'}, split by whether Strict matching already sold the request to a
+        contextual campaign ({pct(total ? cmp.alreadySelling.requests / total : 0)} of requests) or not ({pct(total ? cmp.newDemand.requests / total : 0)}).
       </p>
       <div className="mt-5 space-y-4">
         {rows.map((r) => (
-          <div key={r.label} className="grid grid-cols-[96px_1fr_64px] items-center gap-3 sm:grid-cols-[120px_1fr_72px]">
+          <div key={r.label} className="grid grid-cols-[96px_1fr_72px] items-center gap-3 sm:grid-cols-[120px_1fr_80px]">
             <span className={`text-sm ${r.strict ? 'text-ink-3' : 'font-medium text-ink'}`}>{r.label}</span>
             <div className="flex h-7 overflow-hidden rounded-md bg-sunken">
-              <div
-                className={`h-full transition-[width] duration-300 ${r.strict ? 'bg-ink-4/60' : 'bg-accent'}`}
-                style={{ width: w(r.already) }}
-                title={`Already selling: ${money(r.already)}`}
-              />
-              <div
-                className={`h-full transition-[width] duration-300 ${r.strict ? 'bg-ink-4/25' : 'bg-band-broad'}`}
-                style={{ width: w(r.other) }}
-                title={`${r.otherLabel}: ${money(r.other)}`}
-              />
+              <div className={`h-full transition-[width] duration-300 ${r.strict ? 'bg-ink-4/60' : 'bg-accent'}`} style={{ width: w(r.already) }} title={`Already selling: ${f(r.already * k)}`} />
+              <div className={`h-full transition-[width] duration-300 ${r.strict ? 'bg-ink-4/25' : 'bg-band-broad'}`} style={{ width: w(r.other) }} title={`${r.otherLabel}: ${f(r.other * k)}`} />
             </div>
-            <span className="text-right font-mono text-sm text-ink">{money(r.already + r.other)}</span>
+            <span className="text-right font-mono text-sm text-ink">{f((r.already + r.other) * k)}</span>
           </div>
         ))}
       </div>
@@ -472,19 +576,20 @@ export function Breakdown({ cmp }: { cmp: Comparison }) {
         <div className="flex items-start gap-2.5">
           <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-sm bg-accent" />
           <span className="text-ink-2">
-            Already selling: <span className={`font-mono ${lossAlready < 0 ? 'text-neg' : 'text-pos'}`}>{signedMoney(lossAlready)}</span>. Discounts on
-            pages Strict already sold, mostly mixed or less-certain pages like P7. Shown, not hidden.
+            Already selling: <span className={`font-mono ${lossAlready < -1e-9 ? 'text-neg' : 'text-pos'}`}>{sf(lossAlready * k)}</span>. Protected: every
+            Strict-eligible bid on pages like P1 and P7 still bids in full, so nothing Strict sold today is discounted.
           </span>
         </div>
         <div className="flex items-start gap-2.5">
           <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-sm bg-band-broad" />
           <span className="text-ink-2">
-            New demand: <span className={`font-mono ${gainNew >= 0 ? 'text-pos' : 'text-neg'}`}>{signedMoney(gainNew)}</span> versus run-of-network on the
-            requests Strict couldn't match, like P2.
+            New demand: <span className={`font-mono ${gainNew >= 0 ? 'text-pos' : 'text-neg'}`}>{sf(gainNew * k)}</span> versus run-of-network on the requests
+            Strict couldn't match, like P2.
           </span>
         </div>
       </div>
       <Footnote className="mt-3" />
+      {perMillion && <p className="mt-1 text-xs text-ink-3">Scaled {PER_M_LABEL}: the 1,000 simulated requests × 1,000.</p>}
     </section>
   )
 }

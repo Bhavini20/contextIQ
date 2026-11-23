@@ -50,6 +50,7 @@ export function HowItWorks() {
           {/* Cache link */}
           <path d="M 880 108 L 880 150 L 302 150 L 302 252" stroke="var(--line-2)" strokeWidth="2" strokeDasharray="4 4" fill="none" markerEnd="url(#arrow)" />
           <text x="590" y="168" fontSize="10.5" textAnchor="middle" fill="var(--ink-3)">page profile: model version, timestamp, content hash, expiry</text>
+          <text x="590" y="186" fontSize="10.5" textAnchor="middle" fill="var(--ink-2)" fontStyle="italic">written once, read on every request</text>
 
           {/* Path B */}
           <path id="pathB" d="M 90 280 L 910 280" stroke="var(--accent)" strokeOpacity="0.35" strokeWidth="2" fill="none" />
@@ -71,6 +72,14 @@ export function HowItWorks() {
                   <animateMotion dur="4.5s" begin={`${b}s`} repeatCount="indefinite" path="M 90 80 L 880 80" />
                 </circle>
               ))}
+              {/* Hand-off: every 4.5 s, when a scored page lands in the cache, one profile travels to the lookup, which lights up. */}
+              <circle r="4" fill="var(--ink-3)" opacity="0">
+                <animateMotion dur="4.5s" begin="4.5s" repeatCount="indefinite" path="M 880 108 L 880 150 L 302 150 L 302 252" keyPoints="0;1;1" keyTimes="0;0.4;1" calcMode="linear" />
+                <animate attributeName="opacity" dur="4.5s" begin="4.5s" repeatCount="indefinite" values="1;1;0;0" keyTimes="0;0.4;0.42;1" />
+              </circle>
+              <rect x={90 + 164 - 72} y={252} width={144} height={56} rx={10} fill="none" stroke="var(--accent)" strokeWidth={2} opacity="0">
+                <animate attributeName="opacity" dur="4.5s" begin="4.5s" repeatCount="indefinite" values="0;0;1;0;0" keyTimes="0;0.38;0.44;0.75;1" />
+              </rect>
               {[0, 0.3, 0.6, 0.9].map((b) => (
                 <circle key={`b${b}`} r="4" fill="var(--accent)">
                   <animateMotion dur="1.2s" begin={`${b}s`} repeatCount="indefinite" path="M 90 280 L 910 280" />
@@ -109,7 +118,7 @@ export function HowItWorks() {
             The request never waits. ContextIQ uses the freshest section- or site-level profile, marks it as a fallback and lowers confidence. If nothing
             reliable exists, it makes no confidence claim and existing rules apply. The page is queued and scored for the next request.
           </p>
-          <button onClick={() => set({ view: 'pages', pageId: 'P4' })} className="mt-2 text-sm font-medium text-accent-ink hover:underline">
+          <button onClick={() => set({ view: 'pages', pageId: 'P4' })} className="mt-2 text-sm font-medium text-cta-ink hover:underline">
             See it on P4, then press Rescore now →
           </button>
 
@@ -170,7 +179,7 @@ function OpenRtb({ page, profile }: { page: ReturnType<typeof useApp>['page']; p
       <code>
         {'{\n  '}{K('site')}{': {\n    '}
         {K('page')}{': '}{S(`https://${page.publication.toLowerCase().replace(/[^a-z0-9]+/g, '')}.example/${slug}`)}{',\n    '}
-        {K('cattax')}{': '}{N(2)}{',  '}{C('// IAB Content Taxonomy 2.x')}{'\n    '}
+        {K('cattax')}{': '}{N(2)}{',  '}{C('// AdCOM list: IAB Tech Lab Content Taxonomy 2.0')}{'\n    '}
         {K('cat')}{': ['}{cats}{'],\n    '}
         {K('pagecat')}{': ['}{cats}{'],\n    '}
         {K('content')}{': { '}{K('cat')}{': ['}{cats}{'], '}{K('language')}{': '}{S(page.language === 'hi-en' ? 'hi' : 'en')}{' },\n    '}

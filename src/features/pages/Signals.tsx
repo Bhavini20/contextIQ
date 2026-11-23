@@ -6,13 +6,14 @@ import { BandTag, MatchMeter, Num, ReasonChip, Tip, Why } from '../../components
 import { fitFor, suitabilityCheck } from '../../engine/engine'
 import { topicPath, RELATIONSHIP_LABEL } from '../../engine/taxonomy'
 import { FLAG_REASON } from '../../engine/types'
-import { prob } from '../../lib/format'
+import { pm, prob, prob3 } from '../../lib/format'
 
 const STEPS = ['Queued', 'Extracting', 'Scoring', 'Cached'] as const
 
 export function Signals() {
   const { page, profile, state, set } = useApp()
-  const [matchFor, setMatchFor] = useState(state.focus === 'all' ? 'nova' : state.focus)
+  const matchFor = state.focus === 'all' ? 'nova' : state.focus
+  const setMatchFor = (id: string) => set({ focus: id })
   const campaigns = state.campaigns.filter((c) => c.kind === 'contextual')
   const campaign = campaigns.find((c) => c.id === matchFor) ?? campaigns[0]
 
@@ -124,8 +125,8 @@ export function Signals() {
         </div>
         <MatchMeter p={p} threshold={campaign.threshold} confidence={profile.confidence ?? 0} fit={fit?.fit ?? 0} muted={!suit.pass} />
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px]">
-          <Tip tip={`${prob(profile.confidence ?? 0)} confidence × ${prob(fit?.fit ?? 0)} fit`}>
-            <span className="font-mono text-ink">P(match) = {prob(p)}</span>
+          <Tip tip={`${prob3(profile.confidence ?? 0)} confidence × ${prob3(fit?.fit ?? 0)} fit = ${prob3(p)}`}>
+            <span className="font-mono text-ink">P(match) = {pm(p, campaign.threshold)}</span>
           </Tip>
           <BandTag band={p >= 0.8 ? 'specific' : p >= 0.5 ? 'broad' : 'fallback'} muted={!suit.pass} />
           <span className="text-ink-3">
@@ -146,7 +147,7 @@ export function Signals() {
       </div>
       <button
         onClick={() => set({ view: 'campaigns' })}
-        className="mt-4 text-xs font-medium text-accent-ink hover:underline"
+        className="mt-4 text-xs font-medium text-cta-ink hover:underline"
       >
         Edit {campaign.name}'s threshold and preset →
       </button>
@@ -226,7 +227,7 @@ function Rescore() {
         ) : step === null ? (
           <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-between gap-3">
             <span className="text-[13px] leading-snug text-ink-2">Published 5 minutes ago. The request didn't wait: it used the Mobile section's profile, with lower confidence.</span>
-            <button onClick={start} className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:bg-accent-ink">
+            <button onClick={start} className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-cta px-3 py-1.5 text-sm font-medium text-white hover:bg-cta-hover">
               <RefreshCw size={14} /> Rescore now
             </button>
           </motion.div>
