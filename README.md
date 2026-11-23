@@ -28,7 +28,7 @@ Or from the CLI: `npx vercel --prod`.
 
 ## Before submitting
 
-- Add the proposal PDF as `public/ContextIQ-proposal.pdf`; the "Read the proposal" link points to `/ContextIQ-proposal.pdf`.
+- The proposal PDF lives at `public/ContextIQ-proposal-bhavini.pdf`; the "Read the proposal" link points to `/ContextIQ-proposal-bhavini.pdf`.
 - Optionally export `public/og.svg` to `public/og.png` (1200×630) and point `og:image` at it with an absolute URL; most social platforms don't render SVG previews.
 
 ## Project structure
