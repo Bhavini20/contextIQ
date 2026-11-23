@@ -25,7 +25,7 @@ interface Node {
   parent: TopicId | null
 }
 
-const NODES: Node[] = [
+export const NODES: Node[] = [
   { id: 'technology', name: 'Technology', parent: null },
   { id: 'mobile', name: 'Mobile', parent: 'technology' },
   { id: 'smartphones', name: 'Smartphones', parent: 'mobile' },
@@ -117,4 +117,29 @@ export function relationship(t: TopicId, c: TopicId): Relationship {
 
 export function closeness(t: TopicId, c: TopicId): number {
   return CLOSENESS[relationship(t, c)]
+}
+
+/**
+ * IAB Tech Lab Content Taxonomy 2.2 (OpenRTB cattax = 6, per the AdCOM category-taxonomies list) node for each demo topic.
+ * Checked against the official "Content Taxonomy 2.2.tsv" (IAB Tech Lab, InteractiveAdvertisingBureau/Taxonomies); the same IDs
+ * hold in 2.0, which AdCOM now marks deprecated. `exact: false` marks topics with no exact node, mapped to the nearest one.
+ */
+export const IAB_CT2: Record<TopicId, { id: string; name: string; exact: boolean }> = {
+  technology: { id: '596', name: 'Technology & Computing', exact: true },
+  mobile: { id: '632', name: 'Consumer Electronics', exact: true },
+  smartphones: { id: '635', name: 'Smartphones', exact: true },
+  tablets: { id: '636', name: 'Tablets and E-readers', exact: true },
+  computing: { id: '599', name: 'Computing', exact: true },
+  laptops: { id: '630', name: 'Laptops', exact: true },
+  finance: { id: '391', name: 'Personal Finance', exact: true },
+  payments: { id: '392', name: 'Consumer Banking', exact: false },
+  'digital-wallets': { id: '392', name: 'Consumer Banking', exact: false },
+  'personal-finance': { id: '396', name: 'Financial Planning', exact: false },
+  travel: { id: '653', name: 'Travel', exact: true },
+  flights: { id: '672', name: 'Air Travel', exact: true },
+  hotels: { id: '668', name: 'Hotels and Motels', exact: true },
+  health: { id: '223', name: 'Healthy Living', exact: true },
+  running: { id: '227', name: 'Running and Jogging', exact: true },
+  lifestyle: { id: '441', name: 'Real Estate', exact: false },
+  'urban-living': { id: '442', name: 'Apartments', exact: false },
 }

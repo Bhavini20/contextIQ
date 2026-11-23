@@ -1,7 +1,7 @@
 import { useReducedMotion } from 'framer-motion'
 import { useApp } from '../../app/state'
 import { SectionTitle } from '../../components/ui'
-import { topicName } from '../../engine/taxonomy'
+import { IAB_CT2, topicName } from '../../engine/taxonomy'
 
 const BG = ['Page discovered', 'Kafka queue', 'Extract', 'Score', 'Cache']
 const BG_SUB = ['first request or push', 'retries, dead-letter', 'title, body, metadata', 'labels + three signals', 'low-latency key-value']
@@ -152,8 +152,10 @@ export function HowItWorks() {
           </p>
           <OpenRtb page={page} profile={profile} />
           <p className="mt-2 text-xs text-ink-3">
-            Category IDs are illustrative. Source: IAB Tech Lab OpenRTB 2.6 (<code className="font-mono">site.cat</code>, <code className="font-mono">site.pagecat</code>,{' '}
-            <code className="font-mono">site.content.cat</code>, <code className="font-mono">cattax</code>).
+            Category IDs are IAB Tech Lab Content Taxonomy 2.2 (<code className="font-mono">cattax</code> 6), checked against the official list. The demo
+            taxonomy is simplified: where 2.2 has no exact node, the nearest one is sent and marked "nearest" (Payments and Digital wallets → 392 Consumer
+            Banking, Personal finance → 396 Financial Planning, Lifestyle → 441 Real Estate, Urban living → 442 Apartments). Fields: OpenRTB 2.6{' '}
+            <code className="font-mono">site.cat</code>, <code className="font-mono">site.pagecat</code>, <code className="font-mono">site.content.cat</code>.
           </p>
         </div>
       </div>
@@ -161,14 +163,11 @@ export function HowItWorks() {
   )
 }
 
-const CAT_ID: Record<string, string> = {
-  technology: '596', mobile: '632', smartphones: '640', tablets: '641', computing: '599', laptops: '628',
-  finance: '391', payments: '403', 'digital-wallets': '404', 'personal-finance': '397',
-  travel: '653', flights: '661', hotels: '664', health: '223', running: '237', lifestyle: '210', 'urban-living': '216',
-}
-
 function OpenRtb({ page, profile }: { page: ReturnType<typeof useApp>['page']; profile: ReturnType<typeof useApp>['profile'] }) {
-  const cats = profile.topics.map((t) => `"${CAT_ID[t.topic]}"`).join(', ')
+  // One ID per Content Taxonomy 2.2 node: two demo topics can share their nearest node.
+  const nodes = [...new Map(profile.topics.map((t) => [IAB_CT2[t.topic].id, IAB_CT2[t.topic]])).values()]
+  const cats = nodes.map((n) => `"${n.id}"`).join(', ')
+  const names = nodes.map((n) => `${n.id} ${n.name}${n.exact ? '' : ' (nearest)'}`).join(', ')
   const K = (s: string) => <span className="text-accent-ink">"{s}"</span>
   const S = (s: string) => <span className="text-pos">"{s}"</span>
   const N = (n: number | string) => <span className="text-warn">{n}</span>
@@ -179,8 +178,8 @@ function OpenRtb({ page, profile }: { page: ReturnType<typeof useApp>['page']; p
       <code>
         {'{\n  '}{K('site')}{': {\n    '}
         {K('page')}{': '}{S(`https://${page.publication.toLowerCase().replace(/[^a-z0-9]+/g, '')}.example/${slug}`)}{',\n    '}
-        {K('cattax')}{': '}{N(2)}{',  '}{C('// AdCOM list: IAB Tech Lab Content Taxonomy 2.0')}{'\n    '}
-        {K('cat')}{': ['}{cats}{'],\n    '}
+        {K('cattax')}{': '}{N(6)}{',  '}{C('// AdCOM list: IAB Tech Lab Content Taxonomy 2.2')}{'\n    '}
+        {K('cat')}{': ['}{cats}{'],  '}{C(`// ${names}`)}{'\n    '}
         {K('pagecat')}{': ['}{cats}{'],\n    '}
         {K('content')}{': { '}{K('cat')}{': ['}{cats}{'], '}{K('language')}{': '}{S(page.language === 'hi-en' ? 'hi' : 'en')}{' },\n    '}
         {K('ext')}{': {\n      '}{K('contextiq')}{': {\n        '}
