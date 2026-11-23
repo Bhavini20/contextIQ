@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { CAMPAIGNS, getPage } from '../engine/data'
 import { decide, type Decision } from '../engine/engine'
 import { inventory } from '../engine/inventory'
-import { advertiserReport, suggestThreshold } from '../engine/metrics'
+import { advertiserReport, market as computeMarket, suggestThreshold } from '../engine/metrics'
 import { money, pm, prob, usd, PER_M } from '../lib/format'
 import { useApp, type AppState } from './state'
 
@@ -112,13 +112,14 @@ export const STEPS: Step[] = [
   {
     title: 'Move the threshold',
     enter: (set) => set({ view: 'tradeoffs', focus: 'nova' }),
-    caption: (_s, ctx) => {
-      const c = ctx.market.cmp
+    caption: (s, ctx) => {
+      // Quote the preset figure the dashboard shows by default, not wherever the sweep happens to be.
+      const c = computeMarket(inventory(), atPresets(s).campaigns, ctx.opts).cmp
       const rev = c.strict.revenue ? c.ciq.revenue / c.strict.revenue - 1 : 0
       return (
         <>
           Watch Nova Phones' threshold sweep from <M>0.40</M> to <M>0.90</M>: fill, revenue, cost per conversion and relevance move against the dashed Strict
-          baseline. Revenue never dips below it: protected bids don't move, and the threshold only decides which extra matches join. Today ContextIQ adds{' '}
+          baseline. Revenue never dips below it: protected bids don't move, and the threshold only decides which extra matches join. At the presets ContextIQ adds{' '}
           <M>{(rev * 100).toFixed(1)}%</M> publisher revenue.
         </>
       )

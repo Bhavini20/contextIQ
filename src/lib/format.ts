@@ -8,7 +8,8 @@ export const signedMoney = (x: number) => signed(x, (n) => `$${n.toFixed(2)}`)
 export const signedPct = (x: number) => signed(x, (n) => `${(n * 100).toFixed(1)}%`)
 export const signedPts = (x: number) => signed(x, (n) => `${(n * 100).toFixed(1)} pts`)
 
-export const PROPOSAL_PDF_URL = 'PROPOSAL_PDF_URL' // TODO: replace with the hosted proposal PDF link
+/** Served from public/ContextIQ-proposal.pdf. */
+export const PROPOSAL_PDF_URL = '/ContextIQ-proposal.pdf'
 export const AUTHOR_NAME = 'Bhavini Singh'
 
 /** Three decimals, for numbers inside a written-out formula ("$4.00 × 0.883 = $3.53"). */

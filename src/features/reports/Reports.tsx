@@ -178,7 +178,8 @@ function Advertiser() {
               <p className="mt-3 text-sm leading-relaxed text-ink-2">{suggestion.reason}</p>
               <p className="mt-1 text-xs text-ink-3">
                 Rule: within this preset's range ({prob(suggestion.range[0])}–{prob(suggestion.range[1])}), the threshold with the most conversions per $ that keeps
-                at least half of today's impressions and doesn't lower relevance precision.
+                at least half of today's impressions and doesn't lower relevance precision. A change must add at least 5% conversions per $, and
+                at least 10% if it costs more than 30% of impressions.
               </p>
               {!suggestion.same ? (
                 <button

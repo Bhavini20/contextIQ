@@ -324,6 +324,13 @@ export interface Suggestion {
   reason: string
 }
 
+/** Smallest gain in conversions per $ worth recommending a change for. */
+export const MIN_GAIN = 0.05
+/** Losing more than this share of impressions… */
+export const BIG_LOSS = 0.3
+/** …needs at least this gain in conversions per $. */
+export const BIG_LOSS_MIN_GAIN = 0.1
+
 /** Where each preset's threshold is allowed to move. */
 export const PRESET_RANGE: Record<Preset, [number, number]> = {
   strict: [0.75, 0.9],
@@ -333,7 +340,8 @@ export const PRESET_RANGE: Record<Preset, [number, number]> = {
 
 /**
  * Within the preset's range, the threshold with the most conversions per $ that keeps at least half of today's
- * impressions and doesn't lower relevance precision. Ties go to the current threshold, then lower.
+ * impressions, doesn't lower relevance precision, and clears the materiality rules (MIN_GAIN, BIG_LOSS). Otherwise the
+ * current threshold is reported as the best.
  */
 export function suggestThreshold(
   inv: Inventory,
@@ -357,6 +365,10 @@ export function suggestThreshold(
     if (w.impressions < 0.5 * now.impressions || w.spend === 0) continue
     if (w.relevant / w.impressions < nowPrec - 1e-9) continue
     const cpd = w.conversions / w.spend
+    const gain = cpd / nowCpd - 1
+    // Materiality: a change must add at least 5% conversions per $, and losing over 30% of impressions needs at least 10%.
+    if (gain < MIN_GAIN - 1e-9) continue
+    if (w.impressions < (1 - BIG_LOSS) * now.impressions - 1e-9 && gain < BIG_LOSS_MIN_GAIN - 1e-9) continue
     if (cpd > best.cpd * (1 + 1e-9)) best = { t, cpd, imps: w.impressions }
   }
   const same = Math.abs(best.t - campaign.threshold) < 1e-9
